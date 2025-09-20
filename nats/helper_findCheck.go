@@ -1,9 +1,10 @@
 package nats
 
 import (
-	cfg "ibp-geodns-libs/config"
-	max "ibp-geodns-libs/maxmind"
 	"strings"
+
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	max "github.com/ibp-network/ibp-geodns-libs/maxmind"
 )
 
 func findCheckByName(checkName, checkType string) (cfg.Check, bool) {

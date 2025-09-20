@@ -3,8 +3,9 @@ package data2
 import (
 	"database/sql"
 	"encoding/json"
-	"ibp-geodns-libs/matrix"
 	"time"
+
+	"github.com/ibp-network/ibp-geodns-libs/matrix"
 )
 
 // -----------------------------------------------------------------------------

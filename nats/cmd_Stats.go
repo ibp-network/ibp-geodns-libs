@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	dat "ibp-geodns-libs/data"
-	log "ibp-geodns-libs/logging"
+	dat "github.com/ibp-network/ibp-geodns-libs/data"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 
 	"github.com/nats-io/nats.go"
 )

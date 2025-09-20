@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"time"
 
-	cfg "ibp-geodns-libs/config"
-	dat "ibp-geodns-libs/data"
-	data2 "ibp-geodns-libs/data2"
-	log "ibp-geodns-libs/logging"
+	dat "github.com/ibp-network/ibp-geodns-libs/data"
+	data2 "github.com/ibp-network/ibp-geodns-libs/data2"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
+
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
 
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"

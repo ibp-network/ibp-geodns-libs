@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	log "ibp-geodns-libs/logging"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 )
 
 /*

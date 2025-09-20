@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	log "ibp-geodns-libs/logging"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 
 	"github.com/nats-io/nats.go"
 )

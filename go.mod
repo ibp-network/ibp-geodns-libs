@@ -1,4 +1,4 @@
-module ibp-geodns-libs
+module github.com/ibp-network/ibp-geodns-libs
 
 go 1.24.2
 

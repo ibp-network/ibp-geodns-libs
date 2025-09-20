@@ -1,9 +1,10 @@
 package nats
 
 import (
-	"ibp-geodns-libs/data2"
 	"sync"
 	"time"
+
+	"github.com/ibp-network/ibp-geodns-libs/data2"
 )
 
 type UsageRequest = data2.UsageRequest

@@ -2,13 +2,14 @@ package maxmind
 
 import (
 	"fmt"
-	cfg "ibp-geodns-libs/config"
-	log "ibp-geodns-libs/logging"
 	"math"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 
 	"github.com/oschwald/maxminddb-golang"
 )

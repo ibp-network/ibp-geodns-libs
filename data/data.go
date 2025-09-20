@@ -1,10 +1,11 @@
 package data
 
 import (
-	cfg "ibp-geodns-libs/config"
-	mysql "ibp-geodns-libs/data/mysql"
-	log "ibp-geodns-libs/logging"
 	"time"
+
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	mysql "github.com/ibp-network/ibp-geodns-libs/data/mysql"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 )
 
 type InitOptions struct {

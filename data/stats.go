@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	log "ibp-geodns-libs/logging"
-	max "ibp-geodns-libs/maxmind"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
+	max "github.com/ibp-network/ibp-geodns-libs/maxmind"
 )
 
 func statsEnabled() bool {

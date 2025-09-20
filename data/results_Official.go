@@ -1,9 +1,10 @@
 package data
 
 import (
-	cfg "ibp-geodns-libs/config"
 	"sync"
 	"time"
+
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
 )
 
 var Official = OfficialResults{

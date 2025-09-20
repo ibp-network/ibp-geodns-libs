@@ -11,8 +11,8 @@ import (
 	"regexp"
 	"strings"
 
-	cfg "ibp-geodns-libs/config"
-	log "ibp-geodns-libs/logging"
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	log "github.com/ibp-network/ibp-geodns-libs/logging"
 )
 
 func updateMaxmindDatabase() error {
