@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	cfg "ibp-geodns/src/common/config"
-	log "ibp-geodns/src/common/logging"
+	cfg "ibp-geodns-libs/config"
+	log "ibp-geodns-libs/logging"
 )
 
 var (

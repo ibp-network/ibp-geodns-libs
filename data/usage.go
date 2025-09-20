@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	mysql "ibp-geodns/src/common/data/mysql"
+	mysql "ibp-geodns-libs/data/mysql"
 )
 
 type UsageRecord struct {

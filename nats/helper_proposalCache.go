@@ -3,8 +3,8 @@ package nats
 import (
 	"encoding/json"
 
-	data2 "ibp-geodns/src/common/data2"
-	log "ibp-geodns/src/common/logging"
+	data2 "ibp-geodns-libs/data2"
+	log "ibp-geodns-libs/logging"
 
 	"github.com/nats-io/nats.go"
 )

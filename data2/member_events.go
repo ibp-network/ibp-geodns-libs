@@ -3,7 +3,7 @@ package data2
 import (
 	"database/sql"
 	"encoding/json"
-	"ibp-geodns/src/common/matrix"
+	"ibp-geodns-libs/matrix"
 	"time"
 )
 

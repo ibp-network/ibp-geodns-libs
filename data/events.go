@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"ibp-geodns/src/common/data/mysql"
-	log "ibp-geodns/src/common/logging"
+	"ibp-geodns-libs/data/mysql"
+	log "ibp-geodns-libs/logging"
 )
 
 func RecordEvent(checkType, checkName, memberName, domainName, endpoint string, status bool, errorText string, data map[string]interface{}, isIPv6 bool) {

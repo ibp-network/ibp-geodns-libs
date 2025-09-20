@@ -1,9 +1,9 @@
 package data
 
 import (
-	cfg "ibp-geodns/src/common/config"
-	mysql "ibp-geodns/src/common/data/mysql"
-	log "ibp-geodns/src/common/logging"
+	cfg "ibp-geodns-libs/config"
+	mysql "ibp-geodns-libs/data/mysql"
+	log "ibp-geodns-libs/logging"
 	"time"
 )
 

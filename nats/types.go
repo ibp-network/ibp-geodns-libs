@@ -1,7 +1,7 @@
 package nats
 
 import (
-	"ibp-geodns/src/common/data2"
+	"ibp-geodns-libs/data2"
 	"sync"
 	"time"
 )

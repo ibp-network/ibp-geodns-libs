@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	cfg "ibp-geodns/src/common/config"
+	cfg "ibp-geodns-libs/config"
 
 	_ "github.com/go-sql-driver/mysql"
 )

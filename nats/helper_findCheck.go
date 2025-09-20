@@ -1,8 +1,8 @@
 package nats
 
 import (
-	cfg "ibp-geodns/src/common/config"
-	max "ibp-geodns/src/common/maxmind"
+	cfg "ibp-geodns-libs/config"
+	max "ibp-geodns-libs/maxmind"
 	"strings"
 )
 
