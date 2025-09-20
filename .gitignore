@@ -14,9 +14,6 @@ go.work
 go.work.sum
 go.sum
 
-# Ignore config directory but keep structure
-/config/*
-
 # Ignore tmp directory but keep structure
 /tmp/*
 
