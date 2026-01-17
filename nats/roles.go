@@ -3,7 +3,6 @@ package nats
 import (
 	"encoding/json"
 	"regexp"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -118,43 +117,7 @@ func handleAllMessages(m *nats.Msg) {
 			return
 		}
 
-		switch State.ThisNode.NodeRole {
-		case "IBPMonitor":
-			switch subj {
-			case State.SubjectPropose:
-				handleProposal(m)
-			case State.SubjectVote:
-				handleVote(m)
-			case State.SubjectFinalize:
-				handleFinalize(m)
-			case "monitor.stats.getDowntime":
-				handleMonitorStatsRequest(m)
-			default:
-				if strings.Contains(subj, "downtimeReply") {
-					handleMonitorStatsData(m)
-				}
-			}
-
-		case "IBPDns":
-			if subj == "dns.usage.getUsage" {
-				handleDnsUsageRequest(m)
-			} else if strings.Contains(subj, "usageReply") {
-				handleDnsUsageData(m)
-			}
-
-		case "IBPCollator":
-			switch {
-			case subj == State.SubjectPropose:
-				// Cache proposal in memory only — no voting from collator
-				cacheCollatorProposal(m)
-			case subj == "monitor.stats.downtimeData" || strings.Contains(subj, "downtimeReply"):
-				handleMonitorStatsData(m)
-			case subj == "dns.usage.usageData" || strings.Contains(subj, "usageReply"):
-				handleDnsUsageData(m)
-			case subj == State.SubjectFinalize:
-				handleFinalize(m)
-			}
-		}
+		messageRouter.Dispatch(State.ThisNode.NodeRole, m)
 	}()
 }
 

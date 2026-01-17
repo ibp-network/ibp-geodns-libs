@@ -8,6 +8,7 @@ import (
 
 	data2 "github.com/ibp-network/ibp-geodns-libs/data2"
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
+	"github.com/ibp-network/ibp-geodns-libs/nats/subjects"
 
 	"github.com/nats-io/nats.go"
 )
@@ -166,7 +167,7 @@ func StartCollatorServices() error {
 		return err
 	}
 
-	if _, err := Subscribe("dns.usage.usageData", handleUsageData); err != nil {
+	if _, err := Subscribe(subjects.DnsUsageData, handleUsageData); err != nil {
 		return err
 	}
 
