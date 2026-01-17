@@ -69,6 +69,7 @@ func Connect() error {
 		return fmt.Errorf("failed NATS connect: %w", err)
 	}
 	nc = conn
+	NC = conn
 	log.Log(log.Info, "[NATS] Connected to %s", conn.ConnectedUrl())
 	return nil
 }
@@ -79,6 +80,7 @@ func Disconnect() {
 	if nc != nil && !nc.IsClosed() {
 		nc.Close()
 		nc = nil
+		NC = nil
 	}
 }
 

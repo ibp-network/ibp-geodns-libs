@@ -180,6 +180,13 @@ func GetCountryName(ipStr string) string {
 	return ""
 }
 
+// GetClientCountry is a compatibility helper that returns the ISO country code
+// for the provided client IP. External projects historically relied on this
+// symbol, so keep it as a thin wrapper around GetCountryCode.
+func GetClientCountry(ipStr string) string {
+	return GetCountryCode(ipStr)
+}
+
 func GetClassC(ipStr string) string {
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
