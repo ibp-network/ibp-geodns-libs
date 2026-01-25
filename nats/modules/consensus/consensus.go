@@ -228,7 +228,15 @@ func forceFinalize(deps Dependencies, pid core.ProposalID) {
 	}
 	decideLocked(deps, pt)
 	if !pt.Finalized {
-		// No decision yet (e.g., zero monitors). Keep retrying until a monitor is back.
+		// No decision yet (e.g., zero monitors). Resolve as failed to avoid leaks.
+		if deps.CountActiveMonitors() == 0 {
+			pt.Finalized = true
+			pt.Passed = false
+			state.Mu.Unlock()
+			finalize(deps, pt)
+			return
+		}
+		// Otherwise, keep retrying.
 		pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
 	}
 	state.Mu.Unlock()

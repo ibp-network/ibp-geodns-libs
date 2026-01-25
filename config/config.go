@@ -253,18 +253,15 @@ func downloadConfig(url string, initialLoad bool) []byte {
 }
 
 func configUpdater(cfgFile string) {
-	c := GetConfig()
-
-	interval := c.Local.System.ConfigReloadTime
-	if interval <= 0 {
-		log.Log(log.Warn, "ConfigReloadTime <= 0; skipping config updater ticker")
-		return
-	}
-
-	ticker := time.NewTicker(interval * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
+	for {
+		c := GetConfig()
+		interval := c.Local.System.ConfigReloadTime
+		if interval <= 0 {
+			log.Log(log.Warn, "ConfigReloadTime <= 0; skipping reload, retrying in 30s")
+			time.Sleep(30 * time.Second)
+			continue
+		}
+		time.Sleep(interval * time.Second)
 		loadConfig(cfgFile, false)
 	}
 }

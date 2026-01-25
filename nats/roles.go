@@ -2,7 +2,9 @@ package nats
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -34,6 +36,10 @@ func enableRoleInternal(role string) error {
 	State.SubjectFinalize = "consensus.finalize"
 	State.SubjectCluster = "consensus.cluster"
 	State.ProposalTimeout = 30 * time.Second
+
+	if strings.TrimSpace(State.NodeID) == "" {
+		return fmt.Errorf("NodeID is empty; cannot enable role %s", role)
+	}
 
 	if State.Proposals == nil {
 		State.Proposals = make(map[ProposalID]*ProposalTracking)

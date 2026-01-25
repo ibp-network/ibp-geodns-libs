@@ -40,7 +40,8 @@ func loginLoop() {
 		c := cfg.GetConfig().Local.Matrix
 		if c.HomeServerURL == "" || c.Username == "" || c.Password == "" || c.RoomID == "" {
 			log.Log(log.Warn, "[matrix] configuration incomplete – Matrix integration disabled")
-			return
+			time.Sleep(30 * time.Second)
+			continue
 		}
 
 		cli, err := mautrix.NewClient(c.HomeServerURL, "", "")
