@@ -43,7 +43,12 @@ func updateMaxmindDatabase() error {
 
 	for _, dl := range downloads {
 		if err := checkAndDownloadOne(baseDir, accountID, licenseKey, dl.name, dl.editionID, dl.filenameLite, dl.markerFile); err != nil {
-			return err
+			// If the specific DB is missing locally, this is fatal. Otherwise continue.
+			localPath := filepath.Join(baseDir, dl.filenameLite)
+			if st, statErr := os.Stat(localPath); statErr != nil || st.IsDir() {
+				return err
+			}
+			log.Log(log.Warn, "Proceeding with existing %s due to download error: %v", dl.name, err)
 		}
 	}
 

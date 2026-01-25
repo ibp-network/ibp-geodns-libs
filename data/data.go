@@ -1,6 +1,7 @@
 package data
 
 import (
+	"sync"
 	"time"
 
 	cfg "github.com/ibp-network/ibp-geodns-libs/config"
@@ -27,7 +28,15 @@ func Init(opts InitOptions) {
 		go startAutoUpdate()
 	}
 
-	go startPeriodicUsageFlush()
+	ensureUsageFlushOnce()
+}
+
+var usageFlushOnce sync.Once
+
+func ensureUsageFlushOnce() {
+	usageFlushOnce.Do(func() {
+		go startPeriodicUsageFlush()
+	})
 }
 
 // MemberEnable sets Override=false on a member and records an event.

@@ -54,31 +54,41 @@ func loadLocalDatabases(baseDir string) error {
 	countryPath := filepath.Join(baseDir, "CountryLite.mmdb")
 	asnPath := filepath.Join(baseDir, "AsnLite.mmdb")
 
+	cityOK := false
 	if _, statErr := os.Stat(cityPath); statErr == nil {
 		maxmindCity, err = maxminddb.Open(cityPath)
 		if err != nil {
 			return fmt.Errorf("could not open city database %s: %w", cityPath, err)
 		}
+		cityOK = true
 	} else {
 		log.Log(log.Error, "CityLite.mmdb not found at %s", cityPath)
 	}
 
+	countryOK := false
 	if _, statErr := os.Stat(countryPath); statErr == nil {
 		maxmindCountry, err = maxminddb.Open(countryPath)
 		if err != nil {
 			return fmt.Errorf("could not open country database %s: %w", countryPath, err)
 		}
+		countryOK = true
 	} else {
 		log.Log(log.Error, "CountryLite.mmdb not found at %s", countryPath)
 	}
 
+	asnOK := false
 	if _, statErr := os.Stat(asnPath); statErr == nil {
 		maxmindAsn, err = maxminddb.Open(asnPath)
 		if err != nil {
 			return fmt.Errorf("could not open ASN database %s: %w", asnPath, err)
 		}
+		asnOK = true
 	} else {
 		log.Log(log.Error, "AsnLite.mmdb not found at %s", asnPath)
+	}
+
+	if !cityOK && !countryOK && !asnOK {
+		return fmt.Errorf("no MaxMind databases available in %s", baseDir)
 	}
 
 	return nil

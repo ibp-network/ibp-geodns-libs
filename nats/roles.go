@@ -104,7 +104,7 @@ func broadcastClusterJoin() {
 	atomic.StoreInt64(&lastJoin, now)
 
 	if State.ThisNode.NodeID == "" {
-		log.Log(log.Error, "[NATS] JOIN suppressed – NodeID is empty")
+		log.Log(log.Error, "[NATS] JOIN suppressed – NodeID is empty; role not fully active (refuse to proceed)")
 		return
 	}
 	msg := ClusterMessage{

@@ -31,9 +31,14 @@ var (
 // -----------------------------------------------------------------------------
 func Init() {
 	once.Do(func() {
+		go loginLoop()
+	})
+}
+
+func loginLoop() {
+	for {
 		c := cfg.GetConfig().Local.Matrix
-		if c.HomeServerURL == "" || c.Username == "" ||
-			c.Password == "" || c.RoomID == "" {
+		if c.HomeServerURL == "" || c.Username == "" || c.Password == "" || c.RoomID == "" {
 			log.Log(log.Warn, "[matrix] configuration incomplete – Matrix integration disabled")
 			return
 		}
@@ -41,12 +46,11 @@ func Init() {
 		cli, err := mautrix.NewClient(c.HomeServerURL, "", "")
 		if err != nil {
 			log.Log(log.Error, "[matrix] create client: %v", err)
-			return
+			time.Sleep(30 * time.Second)
+			continue
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-
 		resp, err := cli.Login(ctx, &mautrix.ReqLogin{
 			Type: "m.login.password",
 			Identifier: mautrix.UserIdentifier{
@@ -55,9 +59,12 @@ func Init() {
 			},
 			Password: c.Password,
 		})
+		cancel()
+
 		if err != nil {
 			log.Log(log.Error, "[matrix] login failed: %v", err)
-			return
+			time.Sleep(30 * time.Second)
+			continue
 		}
 
 		cli.SetCredentials(resp.UserID, resp.AccessToken)
@@ -66,7 +73,31 @@ func Init() {
 		roomID = id.RoomID(c.RoomID)
 
 		log.Log(log.Info, "[matrix] logged in as %s; ready to post to %s", userID, roomID)
-	})
+		go watchAndReconnect()
+		return
+	}
+}
+
+// watchAndReconnect periodically checks client health; if broken, re-enters loginLoop.
+func watchAndReconnect() {
+	t := time.NewTicker(5 * time.Minute)
+	defer t.Stop()
+	for range t.C {
+		if client == nil || client.AccessToken == "" {
+			log.Log(log.Warn, "[matrix] client not ready, re-authenticating")
+			loginLoop()
+			return
+		}
+		// Lightweight no-op: ensure homeserver is reachable.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := client.Whoami(ctx)
+		cancel()
+		if err != nil {
+			log.Log(log.Warn, "[matrix] WhoAmI failed, re-authenticating: %v", err)
+			loginLoop()
+			return
+		}
+	}
 }
 
 // isReady verifies we have a usable, authenticated client.

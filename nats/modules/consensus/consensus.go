@@ -228,7 +228,7 @@ func forceFinalize(deps Dependencies, pid core.ProposalID) {
 	}
 	decideLocked(deps, pt)
 	if !pt.Finalized {
-		// No decision yet (e.g., zero monitors). Reschedule another finalize attempt.
+		// No decision yet (e.g., zero monitors). Keep retrying until a monitor is back.
 		pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
 	}
 	state.Mu.Unlock()
