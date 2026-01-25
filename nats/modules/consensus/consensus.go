@@ -12,7 +12,7 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-const minConsensusVotes = 2
+const minConsensusVotes = 1
 
 type Dependencies struct {
 	State               *core.NodeState
@@ -227,6 +227,10 @@ func forceFinalize(deps Dependencies, pid core.ProposalID) {
 		return
 	}
 	decideLocked(deps, pt)
+	if !pt.Finalized {
+		// No decision yet (e.g., zero monitors). Reschedule another finalize attempt.
+		pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
+	}
 	state.Mu.Unlock()
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	data2 "github.com/ibp-network/ibp-geodns-libs/data2"
@@ -22,6 +23,8 @@ import (
  *     value in MySQL (UpsertUsage has been made idempotent), so there
  *     is no risk of compounding counts.
  */
+
+var collatorDBInitOnce sync.Once
 
 func parseDateFlexible(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
@@ -160,6 +163,11 @@ func StartMemoryJanitor() {
 }
 
 func StartCollatorServices() error {
+	// Ensure the data2 MySQL connection is initialised before any DB writes.
+	collatorDBInitOnce.Do(func() {
+		data2.Init()
+	})
+
 	if _, err := Subscribe(State.SubjectVote, handleVote); err != nil {
 		return err
 	}

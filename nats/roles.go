@@ -49,7 +49,15 @@ func enableRoleInternal(role string) error {
 	State.ClusterNodes[State.NodeID] = State.ThisNode
 	State.Mu.Unlock()
 
-	_, err := Subscribe(">", handleAllMessages)
+	// Be more resilient to transient NATS unavailability.
+	var err error
+	for i := 0; i < 5; i++ {
+		if _, err = Subscribe(">", handleAllMessages); err == nil {
+			break
+		}
+		log.Log(log.Warn, "[NATS] subscribe failed (attempt %d/5): %v", i+1, err)
+		time.Sleep(2 * time.Second)
+	}
 	if err != nil {
 		return err
 	}

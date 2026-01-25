@@ -43,11 +43,6 @@ func (m module) Handle(msg *nats.Msg) bool {
 			m.deps.HandleStatsReq(msg)
 			return true
 		}
-	case subjects.MonitorStatsData:
-		if m.deps.HandleStatsData != nil {
-			m.deps.HandleStatsData(msg)
-			return true
-		}
 	}
 
 	if strings.Contains(subj, "downtimeReply") && m.deps.HandleStatsData != nil {

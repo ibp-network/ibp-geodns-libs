@@ -17,13 +17,19 @@ type UsageRecord struct {
 	NetworkName string
 	CountryName string
 	Hits        int
+	IsIPv6      bool
 }
 
 func UpsertUsageRecord(rec UsageRecord) error {
+	ipFlag := "0"
+	if rec.IsIPv6 {
+		ipFlag = "1"
+	}
+
 	q := `
 INSERT INTO requests
 (date, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6, hits)
-VALUES (?, ?, ?, ?, ?, ?, ?, '0', ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   hits = hits + VALUES(hits)
 `
@@ -36,6 +42,7 @@ ON DUPLICATE KEY UPDATE
 		nullOrString(rec.Asn),
 		nullOrString(rec.NetworkName),
 		nullOrString(rec.CountryName),
+		ipFlag,
 		rec.Hits,
 	)
 	if err != nil {
@@ -57,11 +64,12 @@ SELECT
   IFNULL(network_asn,'') as network_asn,
   IFNULL(network_name,'') as network_name,
   IFNULL(country_name,'') as country_name,
+  is_ipv6,
   SUM(hits) AS hits
 FROM requests
 WHERE domain_name = ?
   AND date BETWEEN ? AND ?
-GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name
+GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6
 ORDER BY date
 `
 	rows, err := mysql.DB.Query(q, domain, startDate, endDate)
@@ -74,11 +82,10 @@ ORDER BY date
 	for rows.Next() {
 		var r UsageRecord
 		var mName, cCode, a, netName, cName sql.NullString
-
-		var dateStr, dom string
+		var dateStr, dom, ipv6Str string
 		var hits int
 
-		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &hits); err != nil {
+		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &ipv6Str, &hits); err != nil {
 			return nil, fmt.Errorf("GetUsageByDomain scan error: %w", err)
 		}
 		r.Date = dateStr
@@ -89,6 +96,7 @@ ORDER BY date
 		r.NetworkName = netName.String
 		r.CountryName = cName.String
 		r.Hits = hits
+		r.IsIPv6 = ipv6Str == "1"
 
 		results = append(results, r)
 	}
@@ -108,12 +116,13 @@ SELECT
   IFNULL(network_asn,'') as network_asn,
   IFNULL(network_name,'') as network_name,
   IFNULL(country_name,'') as country_name,
+  is_ipv6,
   SUM(hits) AS hits
 FROM requests
 WHERE domain_name = ?
   AND member_name = ?
   AND date BETWEEN ? AND ?
-GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name
+GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6
 ORDER BY date
 `
 	rows, err := mysql.DB.Query(q, domain, member, startDate, endDate)
@@ -126,11 +135,10 @@ ORDER BY date
 	for rows.Next() {
 		var r UsageRecord
 		var mName, cCode, a, netName, cName sql.NullString
-
-		var dateStr, dom string
+		var dateStr, dom, ipv6Str string
 		var hits int
 
-		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &hits); err != nil {
+		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &ipv6Str, &hits); err != nil {
 			return nil, fmt.Errorf("GetUsageByMember scan error: %w", err)
 		}
 		r.Date = dateStr
@@ -141,6 +149,7 @@ ORDER BY date
 		r.NetworkName = netName.String
 		r.CountryName = cName.String
 		r.Hits = hits
+		r.IsIPv6 = ipv6Str == "1"
 
 		results = append(results, r)
 	}
@@ -160,10 +169,11 @@ SELECT
   IFNULL(network_asn,'') as network_asn,
   IFNULL(network_name,'') as network_name,
   IFNULL(country_name,'') as country_name,
+  is_ipv6,
   SUM(hits) AS hits
 FROM requests
 WHERE date BETWEEN ? AND ?
-GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name
+GROUP BY date, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6
 ORDER BY date
 `
 	rows, err := mysql.DB.Query(q, startDate, endDate)
@@ -176,11 +186,10 @@ ORDER BY date
 	for rows.Next() {
 		var r UsageRecord
 		var mName, cCode, a, netName, cName sql.NullString
-
-		var dateStr, dom string
+		var dateStr, dom, ipv6Str string
 		var hits int
 
-		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &hits); err != nil {
+		if err := rows.Scan(&dateStr, &dom, &mName, &cCode, &a, &netName, &cName, &ipv6Str, &hits); err != nil {
 			return nil, fmt.Errorf("GetUsageByCountry scan error: %w", err)
 		}
 		r.Date = dateStr
@@ -191,6 +200,7 @@ ORDER BY date
 		r.NetworkName = netName.String
 		r.CountryName = cName.String
 		r.Hits = hits
+		r.IsIPv6 = ipv6Str == "1"
 
 		results = append(results, r)
 	}

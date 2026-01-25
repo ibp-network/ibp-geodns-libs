@@ -22,8 +22,12 @@ func updateMaxmindDatabase() error {
 	accountID := c.Local.Maxmind.AccountID
 	licenseKey := c.Local.Maxmind.LicenseKey
 	if accountID == "" || licenseKey == "" {
-		log.Log(log.Fatal, "MaxMind AccountID or LicenseKey is missing. Auto-update cannot proceed.")
-		return nil
+		// If credentials are missing but local DBs already exist, allow startup to continue.
+		if haveLocalMaxmindDatabases(baseDir) {
+			log.Log(log.Warn, "MaxMind credentials missing; using existing local databases only")
+			return nil
+		}
+		return fmt.Errorf("maxmind AccountID or LicenseKey is missing; cannot download databases and no local copy found")
 	}
 
 	downloads := []struct {
@@ -38,13 +42,26 @@ func updateMaxmindDatabase() error {
 	}
 
 	for _, dl := range downloads {
-		err := checkAndDownloadOne(baseDir, accountID, licenseKey, dl.name, dl.editionID, dl.filenameLite, dl.markerFile)
-		if err != nil {
-			log.Log(log.Error, "Failed to update %s: %v", dl.name, err)
+		if err := checkAndDownloadOne(baseDir, accountID, licenseKey, dl.name, dl.editionID, dl.filenameLite, dl.markerFile); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+func haveLocalMaxmindDatabases(baseDir string) bool {
+	required := []string{
+		filepath.Join(baseDir, "CityLite.mmdb"),
+		filepath.Join(baseDir, "CountryLite.mmdb"),
+		filepath.Join(baseDir, "AsnLite.mmdb"),
+	}
+	for _, path := range required {
+		if st, err := os.Stat(path); err != nil || st.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func checkAndDownloadOne(
@@ -60,6 +77,10 @@ func checkAndDownloadOne(
 
 	remoteModTime, err := getRemoteLastModified(remoteURL, accountID, licenseKey)
 	if err != nil {
+		if st, statErr := os.Stat(localMmdbPath); statErr == nil && !st.IsDir() {
+			log.Log(log.Warn, "%s HEAD request failed, using existing local db: %v", dbName, err)
+			return nil
+		}
 		return fmt.Errorf("%s HEAD request error: %w", dbName, err)
 	}
 	if remoteModTime == "" {
@@ -77,6 +98,10 @@ func checkAndDownloadOne(
 		tmpArchivePath := filepath.Join(baseDir, dbName+".tar.gz")
 		err = downloadDatabase(remoteURL, accountID, licenseKey, tmpArchivePath)
 		if err != nil {
+			if st, statErr := os.Stat(localMmdbPath); statErr == nil && !st.IsDir() {
+				log.Log(log.Warn, "%s download failed; keeping existing local copy: %v", dbName, err)
+				return nil
+			}
 			return fmt.Errorf("download of %s failed: %w", dbName, err)
 		}
 

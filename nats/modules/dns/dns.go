@@ -30,11 +30,6 @@ func (m module) Handle(msg *nats.Msg) bool {
 			m.deps.HandleUsageRequest(msg)
 			return true
 		}
-	case subjects.DnsUsageData:
-		if m.deps.HandleUsageData != nil {
-			m.deps.HandleUsageData(msg)
-			return true
-		}
 	default:
 		if strings.Contains(msg.Subject, "usageReply") && m.deps.HandleUsageData != nil {
 			m.deps.HandleUsageData(msg)

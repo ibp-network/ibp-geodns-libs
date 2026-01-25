@@ -82,6 +82,7 @@ type UsageRecord struct {
 	NetworkName string `json:"networkName"`
 	CountryName string `json:"countryName"`
 	Hits        int    `json:"hits"`
+	IsIPv6      bool   `json:"isIPv6"`
 }
 
 type UsageResponse struct {

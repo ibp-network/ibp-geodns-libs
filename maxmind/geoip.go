@@ -36,13 +36,12 @@ func Init() {
 		os.Exit(1)
 	}
 
-	err := updateMaxmindDatabase()
-	if err != nil {
-		log.Log(log.Error, "Auto-update error: %v", err)
+	if err := updateMaxmindDatabase(); err != nil {
+		log.Log(log.Fatal, "MaxMind auto-update failed: %v", err)
+		os.Exit(1)
 	}
 
-	err = loadLocalDatabases(baseDir)
-	if err != nil {
+	if err := loadLocalDatabases(baseDir); err != nil {
 		log.Log(log.Fatal, "Failed to load local maxmind databases: %v", err)
 		os.Exit(1)
 	}
@@ -127,8 +126,9 @@ func GetClientCoordinates(ipStr string) (float64, float64) {
 }
 
 func GetCountryCode(ipStr string) string {
-	if maxmindCity == nil {
-		log.Log(log.Error, "CityLite DB is not loaded, cannot fetch country code.")
+	reader := getCountryReader()
+	if reader == nil {
+		log.Log(log.Error, "No MaxMind country database is loaded, cannot fetch country code.")
 		return ""
 	}
 
@@ -143,8 +143,8 @@ func GetCountryCode(ipStr string) string {
 			IsoCode string `maxminddb:"iso_code"`
 		} `maxminddb:"country"`
 	}
-	if err := maxmindCity.Lookup(ip, &record); err != nil {
-		log.Log(log.Error, "Failed city lookup for IP %s: %v", ipStr, err)
+	if err := reader.Lookup(ip, &record); err != nil {
+		log.Log(log.Error, "Failed country lookup for IP %s: %v", ipStr, err)
 		return ""
 	}
 
@@ -152,8 +152,9 @@ func GetCountryCode(ipStr string) string {
 }
 
 func GetCountryName(ipStr string) string {
-	if maxmindCity == nil {
-		log.Log(log.Error, "CityLite DB not loaded, cannot fetch country name.")
+	reader := getCountryReader()
+	if reader == nil {
+		log.Log(log.Error, "No MaxMind country database is loaded, cannot fetch country name.")
 		return ""
 	}
 
@@ -169,8 +170,8 @@ func GetCountryName(ipStr string) string {
 		} `maxminddb:"country"`
 	}
 
-	if err := maxmindCity.Lookup(ip, &record); err != nil {
-		log.Log(log.Error, "Failed city/country lookup for IP %s: %v", ipStr, err)
+	if err := reader.Lookup(ip, &record); err != nil {
+		log.Log(log.Error, "Failed country lookup for IP %s: %v", ipStr, err)
 		return ""
 	}
 
@@ -255,4 +256,11 @@ func ParseUrl(rawURL string) URLParts {
 		Port:      u.Port(),
 		Directory: u.Path,
 	}
+}
+
+func getCountryReader() *maxminddb.Reader {
+	if maxmindCity != nil {
+		return maxmindCity
+	}
+	return maxmindCountry
 }

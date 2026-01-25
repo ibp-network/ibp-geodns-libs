@@ -66,6 +66,8 @@ func InsertNetStatus(rec NetStatusRecord) error {
 	jVotes, _ := json.Marshal(rec.VoteData)
 	jExtra, _ := json.Marshal(rec.Extra)
 
+	ctString := ctToString(rec.CheckType)
+
 	// Ensure StartTime is UTC
 	if rec.StartTime.Location() != time.UTC {
 		rec.StartTime = rec.StartTime.UTC()
@@ -80,7 +82,7 @@ func InsertNetStatus(rec NetStatusRecord) error {
 		  end_time    = IF(VALUES(status)=1,UTC_TIMESTAMP(),NULL)`
 
 	_, err := DB.Exec(q,
-		rec.CheckType,
+		ctString,
 		rec.CheckName,
 		rec.CheckURL,
 		rec.Domain,
@@ -110,12 +112,14 @@ func InsertNetStatus(rec NetStatusRecord) error {
 }
 
 func CloseOpenEvent(rec NetStatusRecord) error {
+	ctString := ctToString(rec.CheckType)
+
 	q := `UPDATE member_events
 		SET end_time = UTC_TIMESTAMP(), status = 1
 		WHERE check_type=? AND check_name=? AND endpoint=? AND domain_name=? AND member_name=? AND is_ipv6=? AND status=0 AND end_time IS NULL`
 
 	_, err := DB.Exec(q,
-		rec.CheckType,
+		ctString,
 		rec.CheckName,
 		rec.CheckURL,
 		rec.Domain,

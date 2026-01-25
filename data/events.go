@@ -93,8 +93,10 @@ func GetMemberEvents(memberName, domain string, start, end time.Time) ([]EventRe
 		}
 
 		var endTime time.Time
+		var endDate string
 		if r.EndTime.Valid {
 			endTime = r.EndTime.Time
+			endDate = endTime.Format("2006-01-02")
 		}
 
 		events = append(events, EventRecord{
@@ -109,7 +111,7 @@ func GetMemberEvents(memberName, domain string, start, end time.Time) ([]EventRe
 			StartTime:  r.StartTime,
 			EndTime:    endTime,
 			StartDate:  r.StartTime.Format("2006-01-02"),
-			EndDate:    endTime.Format("2006-01-02"),
+			EndDate:    endDate,
 			IsIPv6:     r.IsIPv6,
 		})
 	}

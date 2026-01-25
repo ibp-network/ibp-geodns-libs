@@ -178,32 +178,16 @@ done:
 	mu.Lock()
 	defer mu.Unlock()
 
-	aggregateMap := make(map[string]core.UsageRecord)
-
+	// Do not merge IPv4/IPv6 or nodes; return concatenated records to preserve fidelity.
+	aggregated := make([]core.UsageRecord, 0)
 	for nodeID, records := range responseMap {
 		log.Log(log.Debug, "[NATS] RequestAllDnsUsage: aggregating %d records from %s",
 			len(records), nodeID)
-		for _, rec := range records {
-			key := fmt.Sprintf("%s|%s|%s|%s|%s|%s|%s",
-				rec.Date, rec.Domain, rec.MemberName, rec.CountryCode,
-				rec.Asn, rec.NetworkName, rec.CountryName)
-
-			if existing, found := aggregateMap[key]; found {
-				existing.Hits += rec.Hits
-				aggregateMap[key] = existing
-			} else {
-				aggregateMap[key] = rec
-			}
-		}
-	}
-
-	aggregated := make([]core.UsageRecord, 0, len(aggregateMap))
-	for _, rec := range aggregateMap {
-		aggregated = append(aggregated, rec)
+		aggregated = append(aggregated, records...)
 	}
 
 	log.Log(log.Debug,
-		"[NATS] RequestAllDnsUsage: completed with %d unique records from %d nodes",
+		"[NATS] RequestAllDnsUsage: completed with %d records from %d nodes",
 		len(aggregated), len(responseMap))
 
 	return aggregated, nil
@@ -249,6 +233,7 @@ func retrieveLocalUsageRecords(
 					NetworkName: r.NetworkName,
 					CountryName: r.CountryName,
 					Hits:        r.Hits,
+					IsIPv6:      r.IsIPv6,
 				})
 			}
 		}
@@ -268,6 +253,7 @@ func retrieveLocalUsageRecords(
 					NetworkName: r.NetworkName,
 					CountryName: r.CountryName,
 					Hits:        r.Hits,
+					IsIPv6:      r.IsIPv6,
 				})
 			}
 		}
@@ -292,6 +278,7 @@ func retrieveLocalUsageRecords(
 				NetworkName: r.NetworkName,
 				CountryName: r.CountryName,
 				Hits:        r.Hits,
+				IsIPv6:      r.IsIPv6,
 			})
 		}
 	}
