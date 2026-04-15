@@ -214,4 +214,4 @@ for name, service := range config.Services {
 - No external dependencies for core functionality
 
 ## Version
-Current version: v0.5.0 (via GetVersion())
+Current version: v0.6.0 (via GetVersion())
