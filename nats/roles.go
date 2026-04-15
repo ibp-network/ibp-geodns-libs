@@ -17,14 +17,11 @@ const (
 	activeNodeWindow        = 10 * time.Minute
 	broadcastJoinRetryCount = 3
 	broadcastJoinDelay      = 500 * time.Millisecond
-	messageDispatchLimit    = 64
 )
 
 var (
 	reMonitor = regexp.MustCompile(`(?i)monitor`)
 	reDns     = regexp.MustCompile(`(?i)dns`)
-
-	messageDispatchSem = make(chan struct{}, messageDispatchLimit)
 )
 
 var lastJoin int64 // unix‑nano timestamp of our last JOIN
@@ -130,24 +127,21 @@ func broadcastClusterJoin() {
 }
 
 func handleAllMessages(m *nats.Msg) {
-	messageDispatchSem <- struct{}{}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Log(log.Error, "[NATS] message handler panic for %s: %v", m.Subject, r)
-			}
-			<-messageDispatchSem
-		}()
-
-		subj := m.Subject
-		if subj == State.SubjectCluster {
-			handleClusterMessage(m)
-			return
+	defer func() {
+		if r := recover(); r != nil {
+			log.Log(log.Error, "[NATS] message handler panic for %s: %v", m.Subject, r)
 		}
-
-		messageRouter.Dispatch(State.ThisNode.NodeRole, m)
 	}()
+
+	subj := m.Subject
+	if subj == State.SubjectCluster {
+		handleClusterMessage(m)
+		return
+	}
+
+	if !messageRouter.Dispatch(State.ThisNode.NodeRole, m) && strings.HasPrefix(subj, "consensus.") {
+		log.Log(log.Debug, "[NATS] unhandled consensus subject %s for role=%s", subj, State.ThisNode.NodeRole)
+	}
 }
 
 func handleClusterMessage(m *nats.Msg) {
