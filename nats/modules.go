@@ -36,7 +36,7 @@ func registerModules() {
 		CacheProposal:   cacheCollatorProposal,
 		HandleFinalize:  handleFinalize,
 		HandleStatsData: handleMonitorStatsData,
-		HandleUsageData: handleDnsUsageData,
+		HandleUsageData: handleUsageData,
 	})
 }
 

@@ -70,6 +70,9 @@ func handleUsageData(m *nats.Msg) {
 		log.Log(log.Error, "[collator] usageData unmarshal: %v", err)
 		return
 	}
+	if resp.NodeID != "" {
+		markNodeHeard(resp.NodeID)
+	}
 	if len(resp.UsageRecords) == 0 {
 		return
 	}
