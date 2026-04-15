@@ -77,6 +77,32 @@ func applyPendingVotesLocked(deps Dependencies, pt *core.ProposalTracking) int {
 	return applied
 }
 
+func markConsensusSenderHeard(deps Dependencies, nodeID string) {
+	if nodeID == "" {
+		return
+	}
+
+	if deps.MarkNodeHeard != nil {
+		deps.MarkNodeHeard(nodeID)
+	}
+
+	state := deps.State
+	state.Mu.Lock()
+	defer state.Mu.Unlock()
+
+	node, ok := state.ClusterNodes[nodeID]
+	if !ok {
+		node = core.NodeInfo{NodeID: nodeID}
+	}
+	if node.NodeRole == "" {
+		node.NodeRole = "IBPMonitor"
+	}
+	if node.LastHeard.IsZero() {
+		node.LastHeard = time.Now().UTC()
+	}
+	state.ClusterNodes[nodeID] = node
+}
+
 func propose(
 	deps Dependencies,
 	checkType, checkName, memberName, domainName, endpoint string,
@@ -158,7 +184,7 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 	log.Log(log.Debug,
 		"[CONSENSUS] ← PROPOSAL received id=%s type=%s member=%s status=%v v6=%v",
 		prop.ID, prop.CheckType, prop.MemberName, prop.ProposedStatus, prop.IsIPv6)
-	deps.MarkNodeHeard(prop.SenderNodeID)
+	markConsensusSenderHeard(deps, prop.SenderNodeID)
 
 	state.Mu.Lock()
 	if _, exists := state.Proposals[prop.ID]; exists {
@@ -224,7 +250,7 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 		return
 	}
 	log.Log(log.Debug, "[CONSENSUS] ← vote id=%s from=%s agree=%v", v.ProposalID, v.NodeID, v.Agree)
-	deps.MarkNodeHeard(v.SenderNodeID)
+	markConsensusSenderHeard(deps, v.SenderNodeID)
 
 	state.Mu.Lock()
 	pt, ok := state.Proposals[v.ProposalID]
@@ -319,7 +345,7 @@ func HandleFinalize(deps Dependencies, m *nats.Msg) {
 	}
 	log.Log(log.Debug,
 		"[CONSENSUS] ← FINALIZE id=%s PASS=%v", fm.Proposal.ID, fm.Passed)
-	deps.MarkNodeHeard(fm.Proposal.SenderNodeID)
+	markConsensusSenderHeard(deps, fm.Proposal.SenderNodeID)
 
 	if deps.OnFinalize != nil {
 		deps.OnFinalize(fm)

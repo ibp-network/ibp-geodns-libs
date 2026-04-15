@@ -365,3 +365,51 @@ func TestHandleVoteBuffersUntilProposalArrives(t *testing.T) {
 		t.Fatalf("expected buffered vote entry to be cleared after application")
 	}
 }
+
+func TestHandleVoteCountsMonitorByConsensusTrafficEvenWithoutMonitorNamedNodeID(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	deps.CountActiveMonitors = func() int { return 2 }
+	deps.State.ClusterNodes[deps.State.NodeID] = core.NodeInfo{
+		NodeID:    deps.State.NodeID,
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+
+	proposalID := core.ProposalID("proposal-with-rotko-vote")
+	deps.State.Proposals[proposalID] = &core.ProposalTracking{
+		Proposal: core.Proposal{
+			ID:           proposalID,
+			SenderNodeID: "ROTKO",
+		},
+		Votes: map[string]bool{
+			deps.State.NodeID: true,
+		},
+	}
+
+	vote := core.Vote{
+		ProposalID:   proposalID,
+		SenderNodeID: "ROTKO",
+		NodeID:       "ROTKO",
+		Agree:        true,
+		Timestamp:    time.Now().UTC(),
+	}
+
+	payload, err := json.Marshal(vote)
+	if err != nil {
+		t.Fatalf("failed to marshal vote: %v", err)
+	}
+
+	HandleVote(deps, &nats.Msg{Data: payload})
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	pt := deps.State.Proposals[proposalID]
+	if !pt.Finalized || !pt.Passed {
+		t.Fatalf("expected vote from arbitrary monitor node id to count toward quorum")
+	}
+	if got := deps.State.ClusterNodes["ROTKO"].NodeRole; got != "IBPMonitor" {
+		t.Fatalf("expected ROTKO to be classified as IBPMonitor, got %q", got)
+	}
+}
