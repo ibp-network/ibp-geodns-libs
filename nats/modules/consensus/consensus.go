@@ -139,10 +139,6 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 		state.Mu.Unlock()
 		return
 	}
-	if hasMatchingProposalLocked(state, prop) {
-		state.Mu.Unlock()
-		return
-	}
 	state.Proposals[prop.ID] = &core.ProposalTracking{
 		Proposal: prop,
 		Votes:    make(map[string]bool),
