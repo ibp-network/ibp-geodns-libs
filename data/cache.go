@@ -79,6 +79,28 @@ func SaveCache(filePath string, data interface{}) error {
 	return nil
 }
 
+func loadCachesFromFiles(officialFile, localFile string, useLocal bool) {
+	if !useLocal {
+		return
+	}
+
+	log.Log(log.Debug, "[LoadAllCaches] Loading official cache from %s", officialFile)
+	Official.Mu.Lock()
+	if err := LoadCache(officialFile, &Official); err != nil {
+		log.Log(log.Error, "[LoadAllCaches] Official load error: %v", err)
+	}
+	// Keep GetOfficialResults() in sync with the cache-restored official state.
+	publishSnapshotLocked()
+	Official.Mu.Unlock()
+
+	log.Log(log.Debug, "[LoadAllCaches] Loading local cache from %s", localFile)
+	Local.Mu.Lock()
+	if err := LoadCache(localFile, &Local); err != nil {
+		log.Log(log.Error, "[LoadAllCaches] Local load error: %v", err)
+	}
+	Local.Mu.Unlock()
+}
+
 func LoadAllCaches() {
 	muCacheOptions.Lock()
 	useLocal := allowLocalOfficial
@@ -90,21 +112,7 @@ func LoadAllCaches() {
 	officialFile := filepath.Join(workDir, "tmp", officialCacheFile)
 	localFile := filepath.Join(workDir, "tmp", localCacheFile)
 
-	if useLocal {
-		log.Log(log.Debug, "[LoadAllCaches] Loading official cache from %s", officialFile)
-		Official.Mu.Lock()
-		if err := LoadCache(officialFile, &Official); err != nil {
-			log.Log(log.Error, "[LoadAllCaches] Official load error: %v", err)
-		}
-		Official.Mu.Unlock()
-
-		log.Log(log.Debug, "[LoadAllCaches] Loading local cache from %s", localFile)
-		Local.Mu.Lock()
-		if err := LoadCache(localFile, &Local); err != nil {
-			log.Log(log.Error, "[LoadAllCaches] Local load error: %v", err)
-		}
-		Local.Mu.Unlock()
-	}
+	loadCachesFromFiles(officialFile, localFile, useLocal)
 }
 
 func SaveAllCaches() {

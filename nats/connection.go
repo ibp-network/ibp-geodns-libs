@@ -17,6 +17,28 @@ var (
 	connectionMu sync.Mutex
 )
 
+func cloneNatsMsg(m *nats.Msg) *nats.Msg {
+	if m == nil {
+		return nil
+	}
+
+	msgCopy := &nats.Msg{
+		Subject: m.Subject,
+		Reply:   m.Reply,
+	}
+	if m.Data != nil {
+		msgCopy.Data = append([]byte(nil), m.Data...)
+	}
+	if m.Header != nil {
+		msgCopy.Header = make(nats.Header, len(m.Header))
+		for key, values := range m.Header {
+			msgCopy.Header[key] = append([]string(nil), values...)
+		}
+	}
+
+	return msgCopy
+}
+
 func GetConnection() *nats.Conn {
 	connectionMu.Lock()
 	defer connectionMu.Unlock()
@@ -114,7 +136,9 @@ func Subscribe(subject string, cb func(*nats.Msg)) (*nats.Subscription, error) {
 	if nc == nil || nc.IsClosed() {
 		return nil, nats.ErrConnectionClosed
 	}
-	sub, err := nc.Subscribe(subject, func(m *nats.Msg) { go cb(m) })
+	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+		cb(cloneNatsMsg(m))
+	})
 	if err != nil {
 		return nil, err
 	}

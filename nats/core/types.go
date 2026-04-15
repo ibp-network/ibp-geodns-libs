@@ -14,6 +14,7 @@ type NodeState struct {
 	ThisNode        NodeInfo
 	Mu              sync.RWMutex
 	Proposals       map[ProposalID]*ProposalTracking
+	PendingVotes    map[ProposalID]map[string]Vote
 	ClusterNodes    map[string]NodeInfo
 	SubjectPropose  string
 	SubjectVote     string

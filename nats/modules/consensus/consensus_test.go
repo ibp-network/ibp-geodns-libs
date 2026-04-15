@@ -18,6 +18,7 @@ func newTestDependencies() Dependencies {
 		State: &core.NodeState{
 			NodeID:          "monitor-a",
 			Proposals:       make(map[core.ProposalID]*core.ProposalTracking),
+			PendingVotes:    make(map[core.ProposalID]map[string]core.Vote),
 			ClusterNodes:    make(map[string]core.NodeInfo),
 			ProposalTimeout: time.Minute,
 			SubjectPropose:  "consensus.propose",
@@ -302,5 +303,65 @@ func TestProposeCheckStatusVotesOnExistingMatchingProposal(t *testing.T) {
 	defer deps.State.Mu.RUnlock()
 	if got := len(deps.State.Proposals); got != 1 {
 		t.Fatalf("expected existing proposal to be reused, got %d proposals", got)
+	}
+}
+
+func TestHandleVoteBuffersUntilProposalArrives(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	incomingVote := core.Vote{
+		ProposalID:   core.ProposalID("remote-proposal-id"),
+		SenderNodeID: "monitor-b",
+		NodeID:       "monitor-b",
+		Agree:        true,
+		Timestamp:    time.Now().UTC(),
+	}
+
+	votePayload, err := json.Marshal(incomingVote)
+	if err != nil {
+		t.Fatalf("failed to marshal vote: %v", err)
+	}
+
+	HandleVote(deps, &nats.Msg{Data: votePayload})
+
+	deps.State.Mu.RLock()
+	if _, ok := deps.State.PendingVotes[incomingVote.ProposalID]; !ok {
+		deps.State.Mu.RUnlock()
+		t.Fatalf("expected vote to be buffered until proposal arrives")
+	}
+	deps.State.Mu.RUnlock()
+
+	proposal := core.Proposal{
+		ID:             incomingVote.ProposalID,
+		SenderNodeID:   "monitor-b",
+		CheckType:      "domain",
+		CheckName:      "http",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "",
+		ProposedStatus: true,
+		ErrorText:      "",
+		IsIPv6:         false,
+		Timestamp:      time.Now().UTC(),
+	}
+	proposalPayload, err := json.Marshal(proposal)
+	if err != nil {
+		t.Fatalf("failed to marshal proposal: %v", err)
+	}
+
+	HandleProposal(deps, &nats.Msg{Data: proposalPayload})
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	pt, ok := deps.State.Proposals[incomingVote.ProposalID]
+	if !ok {
+		t.Fatalf("expected proposal to be tracked after arrival")
+	}
+	if got, ok := pt.Votes[incomingVote.NodeID]; !ok || !got {
+		t.Fatalf("expected buffered vote to be applied after proposal arrival")
+	}
+	if _, ok := deps.State.PendingVotes[incomingVote.ProposalID]; ok {
+		t.Fatalf("expected buffered vote entry to be cleared after application")
 	}
 }

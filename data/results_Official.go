@@ -73,18 +73,21 @@ func SetOfficialSiteResults(results []SiteResult) {
 	Official.Mu.Lock()
 	defer Official.Mu.Unlock()
 	Official.SiteResults = cloneSiteResults(results)
+	publishSnapshotLocked()
 }
 
 func SetOfficialDomainResults(results []DomainResult) {
 	Official.Mu.Lock()
 	defer Official.Mu.Unlock()
 	Official.DomainResults = cloneDomainResults(results)
+	publishSnapshotLocked()
 }
 
 func SetOfficialEndpointResults(results []EndpointResult) {
 	Official.Mu.Lock()
 	defer Official.Mu.Unlock()
 	Official.EndpointResults = cloneEndpointResults(results)
+	publishSnapshotLocked()
 }
 
 func UpdateOfficialSiteResult(check cfg.Check, member cfg.Member, status bool, errorMsg string, dataMap map[string]interface{}, isIPv6 bool) {

@@ -53,6 +53,30 @@ func findMatchingProposalLocked(state *core.NodeState, prop core.Proposal) *core
 	return nil
 }
 
+func applyPendingVotesLocked(deps Dependencies, pt *core.ProposalTracking) int {
+	state := deps.State
+	if state.PendingVotes == nil {
+		return 0
+	}
+
+	pending, ok := state.PendingVotes[pt.Proposal.ID]
+	if !ok {
+		return 0
+	}
+	delete(state.PendingVotes, pt.Proposal.ID)
+
+	applied := 0
+	for nodeID, vote := range pending {
+		pt.Votes[nodeID] = vote.Agree
+		applied++
+	}
+	if applied > 0 {
+		decideLocked(deps, pt)
+	}
+
+	return applied
+}
+
 func propose(
 	deps Dependencies,
 	checkType, checkName, memberName, domainName, endpoint string,
@@ -145,9 +169,13 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 		Proposal: prop,
 		Votes:    make(map[string]bool),
 	}
+	appliedPending := applyPendingVotesLocked(deps, state.Proposals[prop.ID])
 	state.Proposals[prop.ID].Timer = time.AfterFunc(state.ProposalTimeout,
 		func() { forceFinalize(deps, prop.ID) })
 	state.Mu.Unlock()
+	if appliedPending > 0 {
+		log.Log(log.Debug, "[CONSENSUS]    applied %d pending vote(s) for id=%s", appliedPending, prop.ID)
+	}
 	go voteOnProposal(deps, prop)
 }
 
@@ -159,6 +187,9 @@ func voteOnProposal(deps Dependencies, prop core.Proposal) {
 		prop.CheckType, prop.CheckName, prop.MemberName,
 		prop.DomainName, prop.Endpoint, prop.IsIPv6)
 	if !found {
+		log.Log(log.Debug,
+			"[CONSENSUS]    skip vote id=%s no local status type=%s check=%s member=%s domain=%s endpoint=%s v6=%v",
+			prop.ID, prop.CheckType, prop.CheckName, prop.MemberName, prop.DomainName, prop.Endpoint, prop.IsIPv6)
 		return
 	}
 
@@ -197,7 +228,19 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 
 	state.Mu.Lock()
 	pt, ok := state.Proposals[v.ProposalID]
-	if !ok || pt.Finalized {
+	if !ok {
+		if state.PendingVotes == nil {
+			state.PendingVotes = make(map[core.ProposalID]map[string]core.Vote)
+		}
+		if _, exists := state.PendingVotes[v.ProposalID]; !exists {
+			state.PendingVotes[v.ProposalID] = make(map[string]core.Vote)
+		}
+		state.PendingVotes[v.ProposalID][v.NodeID] = v
+		state.Mu.Unlock()
+		log.Log(log.Debug, "[CONSENSUS]    buffered out-of-order vote id=%s from=%s", v.ProposalID, v.NodeID)
+		return
+	}
+	if pt.Finalized {
 		state.Mu.Unlock()
 		return
 	}

@@ -47,6 +47,9 @@ func enableRoleInternal(role string) error {
 	if State.Proposals == nil {
 		State.Proposals = make(map[ProposalID]*ProposalTracking)
 	}
+	if State.PendingVotes == nil {
+		State.PendingVotes = make(map[ProposalID]map[string]Vote)
+	}
 	if State.ClusterNodes == nil {
 		State.ClusterNodes = make(map[string]NodeInfo)
 	}
