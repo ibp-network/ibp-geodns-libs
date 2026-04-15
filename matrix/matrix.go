@@ -114,6 +114,37 @@ func makeKey(member, checkType, checkName, domain, endpoint string, ipv6 bool) s
 		member, checkType, checkName, domain, endpoint, ipv6)
 }
 
+func storedEventID(v interface{}) (id.EventID, bool) {
+	evID, ok := v.(id.EventID)
+	return evID, ok
+}
+
+func claimOutageAlert(key string) bool {
+	sentinel := id.EventID("")
+
+	for {
+		prev, loaded := offlineMap.LoadOrStore(key, sentinel)
+		if !loaded {
+			return true
+		}
+
+		evID, ok := storedEventID(prev)
+		if !ok {
+			if offlineMap.CompareAndDelete(key, prev) {
+				log.Log(log.Warn, "[matrix] removed invalid cached event for %s", key)
+			}
+			continue
+		}
+
+		if evID != "" {
+			return false
+		}
+
+		// Another goroutine is already announcing this outage.
+		return false
+	}
+}
+
 func getMemberMentions(memberName string) []string {
 	c := cfg.GetConfig()
 
@@ -221,23 +252,10 @@ func NotifyMemberOffline(
 	}
 
 	key := makeKey(member, checkType, checkName, domain, endpoint, ipv6)
-
-	// ---------------------------------------------------------------------
-	// DEDUPLICATION LOGIC
-	// ---------------------------------------------------------------------
-	sentinel := id.EventID("")
-	if prev, loaded := offlineMap.LoadOrStore(key, sentinel); loaded {
-		if prev.(id.EventID) != "" {
-			// Already announced.
-			return
-		}
-		// Another goroutine is announcing – skip duplicate.
+	if !claimOutageAlert(key) {
 		return
 	}
 
-	//----------------------------------------------------------------------
-	// We are the "announcer" for this outage.
-	//----------------------------------------------------------------------
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -276,7 +294,7 @@ func NotifyMemberOnline(
 	body, formattedBody := formatAlert(false, member, checkType, checkName, domain, endpoint, ipv6, "", nil)
 
 	if raw, ok := offlineMap.Load(key); ok {
-		if evID, ok2 := raw.(id.EventID); ok2 && evID != "" {
+		if evID, ok2 := storedEventID(raw); ok2 && evID != "" {
 			// Attempt edit‑in‑place.
 			editErr := editFormattedText(ctx, evID, body, formattedBody)
 			if editErr == nil {
@@ -284,10 +302,16 @@ func NotifyMemberOnline(
 				return
 			}
 			log.Log(log.Warn, "[matrix] edit failed – falling back to new msg: %v", editErr)
+		} else if !ok2 {
+			log.Log(log.Warn, "[matrix] invalid cached event for %s; sending a new online alert", key)
+			offlineMap.Delete(key)
 		}
 	}
 
 	// Either we had no cached event or the edit did not work – send a fresh one.
-	_, _ = sendFormattedText(ctx, body, formattedBody)
+	if _, err := sendFormattedText(ctx, body, formattedBody); err != nil {
+		log.Log(log.Error, "[matrix] failed to send online alert: %v", err)
+		return
+	}
 	offlineMap.Delete(key) // ensure future OFFLINE alerts are allowed again
 }

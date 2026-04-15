@@ -32,25 +32,25 @@ func ProposeCheckStatus(
 	dataMap map[string]interface{},
 	isIPv6 bool,
 ) {
-	state := deps.State
-	state.Mu.RLock()
-	for _, pt := range state.Proposals {
-		if !pt.Finalized &&
-			pt.Proposal.CheckType == checkType &&
-			pt.Proposal.CheckName == checkName &&
-			pt.Proposal.MemberName == memberName &&
-			pt.Proposal.DomainName == domainName &&
-			pt.Proposal.Endpoint == endpoint &&
-			pt.Proposal.ProposedStatus == status &&
-			pt.Proposal.IsIPv6 == isIPv6 {
-			state.Mu.RUnlock()
-			return
-		}
-	}
-	state.Mu.RUnlock()
-
 	propose(deps, checkType, checkName, memberName, domainName, endpoint,
 		status, errorText, dataMap, isIPv6)
+}
+
+func hasMatchingProposalLocked(state *core.NodeState, prop core.Proposal) bool {
+	for _, pt := range state.Proposals {
+		if !pt.Finalized &&
+			pt.Proposal.CheckType == prop.CheckType &&
+			pt.Proposal.CheckName == prop.CheckName &&
+			pt.Proposal.MemberName == prop.MemberName &&
+			pt.Proposal.DomainName == prop.DomainName &&
+			pt.Proposal.Endpoint == prop.Endpoint &&
+			pt.Proposal.ProposedStatus == prop.ProposedStatus &&
+			pt.Proposal.IsIPv6 == prop.IsIPv6 {
+			return true
+		}
+	}
+
+	return false
 }
 
 func propose(
@@ -93,11 +93,29 @@ func propose(
 	if state.Proposals == nil {
 		state.Proposals = make(map[core.ProposalID]*core.ProposalTracking)
 	}
+	if hasMatchingProposalLocked(state, prop) {
+		state.Mu.Unlock()
+		return
+	}
 	state.Proposals[pid] = pt
 	pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
 	state.Mu.Unlock()
 
-	if dataBytes, _ := json.Marshal(prop); deps.Publish(state.SubjectPropose, dataBytes) != nil {
+	dataBytes, err := json.Marshal(prop)
+	if err != nil {
+		log.Log(log.Error, "[NATS] failed to marshal proposal %s: %v", pid, err)
+		state.Mu.Lock()
+		if existing, ok := state.Proposals[pid]; ok {
+			if existing.Timer != nil {
+				existing.Timer.Stop()
+			}
+			delete(state.Proposals, pid)
+		}
+		state.Mu.Unlock()
+		return
+	}
+
+	if deps.Publish(state.SubjectPropose, dataBytes) != nil {
 		log.Log(log.Error, "[NATS] failed to publish proposal %s", pid)
 	}
 
@@ -117,18 +135,22 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 	deps.MarkNodeHeard(prop.SenderNodeID)
 
 	state.Mu.Lock()
-	if _, exists := state.Proposals[prop.ID]; !exists {
-		state.Proposals[prop.ID] = &core.ProposalTracking{
-			Proposal: prop,
-			Votes:    make(map[string]bool),
-		}
-		state.Proposals[prop.ID].Timer = time.AfterFunc(state.ProposalTimeout,
-			func() { forceFinalize(deps, prop.ID) })
+	if _, exists := state.Proposals[prop.ID]; exists {
 		state.Mu.Unlock()
-		go voteOnProposal(deps, prop)
 		return
 	}
+	if hasMatchingProposalLocked(state, prop) {
+		state.Mu.Unlock()
+		return
+	}
+	state.Proposals[prop.ID] = &core.ProposalTracking{
+		Proposal: prop,
+		Votes:    make(map[string]bool),
+	}
+	state.Proposals[prop.ID].Timer = time.AfterFunc(state.ProposalTimeout,
+		func() { forceFinalize(deps, prop.ID) })
 	state.Mu.Unlock()
+	go voteOnProposal(deps, prop)
 }
 
 func voteOnProposal(deps Dependencies, prop core.Proposal) {
@@ -154,7 +176,13 @@ func voteOnProposal(deps Dependencies, prop core.Proposal) {
 		"[CONSENSUS]    vote id=%s agree=%v (local=%v proposed=%v)",
 		prop.ID, v.Agree, localStatus, prop.ProposedStatus)
 
-	if data, _ := json.Marshal(v); deps.Publish(state.SubjectVote, data) != nil {
+	data, err := json.Marshal(v)
+	if err != nil {
+		log.Log(log.Error, "[NATS] failed to marshal vote for %s: %v", prop.ID, err)
+		return
+	}
+
+	if deps.Publish(state.SubjectVote, data) != nil {
 		log.Log(log.Error, "[NATS] failed to publish vote for %s", prop.ID)
 	}
 }
@@ -277,12 +305,17 @@ func finalize(deps Dependencies, pt *core.ProposalTracking) {
 		Passed:    pt.Passed,
 		DecidedAt: time.Now().UTC(),
 	}
-	if data, _ := json.Marshal(msg); deps.Publish(state.SubjectFinalize, data) != nil {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Log(log.Error, "[NATS] failed to marshal finalize for %s: %v", pt.Proposal.ID, err)
+		if deps.OnFinalize != nil {
+			deps.OnFinalize(msg)
+		}
+	} else if deps.Publish(state.SubjectFinalize, data) != nil {
 		log.Log(log.Error, "[NATS] failed to publish finalize for %s", pt.Proposal.ID)
-	}
-
-	if deps.OnFinalize != nil {
-		deps.OnFinalize(msg)
+		if deps.OnFinalize != nil {
+			deps.OnFinalize(msg)
+		}
 	}
 
 	state.Mu.Lock()

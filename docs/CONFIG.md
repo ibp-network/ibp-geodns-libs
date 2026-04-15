@@ -40,7 +40,7 @@ Initializes the configuration system with a local config file path.
 - Loads system configuration
 - Fetches remote configurations
 - Starts auto-updater goroutine
-- Thread-safe initialization with sync.Once
+- Thread-safe initialization with a single active updater goroutine
 
 ### GetConfig() Config
 Returns a deep copy of the current configuration.
@@ -214,4 +214,4 @@ for name, service := range config.Services {
 - No external dependencies for core functionality
 
 ## Version
-Current version: v0.4.0 (via GetVersion())
+Current version: v0.5.0 (via GetVersion())

@@ -17,25 +17,25 @@ var Local = LocalResults{
 func SetLocalSiteResults(results []SiteResult) {
 	Local.Mu.Lock()
 	defer Local.Mu.Unlock()
-	Local.SiteResults = results
+	Local.SiteResults = cloneSiteResults(results)
 }
 
 func SetLocalDomainResults(results []DomainResult) {
 	Local.Mu.Lock()
 	defer Local.Mu.Unlock()
-	Local.DomainResults = results
+	Local.DomainResults = cloneDomainResults(results)
 }
 
 func SetLocalEndpointResults(results []EndpointResult) {
 	Local.Mu.Lock()
 	defer Local.Mu.Unlock()
-	Local.EndpointResults = results
+	Local.EndpointResults = cloneEndpointResults(results)
 }
 
 func GetLocalResults() (sites []SiteResult, domains []DomainResult, endpoints []EndpointResult) {
 	Local.Mu.RLock()
 	defer Local.Mu.RUnlock()
-	return Local.SiteResults, Local.DomainResults, Local.EndpointResults
+	return cloneSiteResults(Local.SiteResults), cloneDomainResults(Local.DomainResults), cloneEndpointResults(Local.EndpointResults)
 }
 
 func UpdateLocalSiteResult(check cfg.Check, member cfg.Member, status bool, errorMsg string, dataMap map[string]interface{}, isIPv6 bool) {
@@ -51,17 +51,17 @@ func UpdateLocalSiteResult(check cfg.Check, member cfg.Member, status bool, erro
 	}
 
 	newResult := Result{
-		Member:    member,
+		Member:    cloneMember(member),
 		Status:    status,
 		Checktime: time.Now().UTC(),
 		ErrorText: errorMsg,
-		Data:      dataMap,
+		Data:      cloneAnyMap(dataMap),
 		IsIPv6:    isIPv6,
 	}
 
 	if sIndex == -1 {
 		site := SiteResult{
-			Check:   check,
+			Check:   cloneCheck(check),
 			IsIPv6:  isIPv6,
 			Results: []Result{newResult},
 		}
@@ -98,18 +98,18 @@ func UpdateLocalDomainResult(check cfg.Check, member cfg.Member, service cfg.Ser
 	}
 
 	newResult := Result{
-		Member:    member,
+		Member:    cloneMember(member),
 		Status:    status,
 		Checktime: time.Now().UTC(),
 		ErrorText: errorMsg,
-		Data:      dataMap,
+		Data:      cloneAnyMap(dataMap),
 		IsIPv6:    isIPv6,
 	}
 
 	if dIndex == -1 {
 		Local.DomainResults = append(Local.DomainResults, DomainResult{
-			Check:   check,
-			Service: service,
+			Check:   cloneCheck(check),
+			Service: cloneService(service),
 			Domain:  domain,
 			IsIPv6:  isIPv6,
 			Results: []Result{newResult},
@@ -146,18 +146,18 @@ func UpdateLocalEndpointResult(check cfg.Check, member cfg.Member, service cfg.S
 	}
 
 	newResult := Result{
-		Member:    member,
+		Member:    cloneMember(member),
 		Status:    status,
 		Checktime: time.Now().UTC(),
 		ErrorText: errorMsg,
-		Data:      dataMap,
+		Data:      cloneAnyMap(dataMap),
 		IsIPv6:    isIPv6,
 	}
 
 	if eIndex == -1 {
 		Local.EndpointResults = append(Local.EndpointResults, EndpointResult{
-			Check:   check,
-			Service: service,
+			Check:   cloneCheck(check),
+			Service: cloneService(service),
 			RpcUrl:  endpoint,
 			Domain:  domain,
 			IsIPv6:  isIPv6,

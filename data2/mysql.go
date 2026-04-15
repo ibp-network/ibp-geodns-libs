@@ -27,6 +27,7 @@ func Init() {
 	DB, err = sql.Open("mysql", dsn)
 	if err != nil {
 		log.Log(log.Fatal, "[data2] MySQL DSN open error: %v", err)
+		panic(fmt.Sprintf("[data2] failed to open MySQL DSN: %v", err))
 	}
 
 	DB.SetConnMaxIdleTime(2 * time.Minute)
@@ -45,4 +46,7 @@ func Init() {
 	}
 
 	log.Log(log.Fatal, "[data2] Unable to connect to MySQL after 30 s: %v", err)
+	_ = DB.Close()
+	DB = nil
+	panic(fmt.Sprintf("[data2] unable to connect to MySQL after 30 s: %v", err))
 }

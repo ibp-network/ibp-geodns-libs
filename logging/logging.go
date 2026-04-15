@@ -5,22 +5,24 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync/atomic"
 )
 
 var logger *log.Logger
-var logLevel LogLevel = Info
+var logLevel atomic.Int32
 
 func init() {
 	logger = log.New(os.Stdout, "", log.LstdFlags|log.LUTC)
+	logLevel.Store(int32(Info))
 	Log(Debug, "Logging Package initializing...")
 }
 
 func SetLogLevel(level LogLevel) {
-	logLevel = level
+	logLevel.Store(int32(level))
 }
 
 func Log(level LogLevel, format string, v ...interface{}) {
-	if level >= logLevel {
+	if level >= LogLevel(logLevel.Load()) {
 		msg := fmt.Sprintf(format, v...)
 		logger.Printf("%s: %s", level.String(), msg)
 	}

@@ -32,12 +32,12 @@ Two-tier data persistence layer for monitoring results and metrics.
 
 **data/** - Primary data layer:
 - Official/local result storage with consensus updates
-- Usage statistics with in-memory aggregation
+- Usage statistics with in-memory aggregation and incremental MySQL flushes
 - Event recording for member outages
 - 5-minute automatic flush to MySQL
 
 **data2/** - Collator-optimized layer:
-- Per-node usage upserts (idempotent)
+- Per-node usage upserts (idempotent replacements, not increments)
 - Network status tracking with vote data
 - Proposal caching for consensus
 - Matrix notification triggers
@@ -176,7 +176,7 @@ CREATE TABLE member_events (
 );
 ```
 
-### requests (usage)
+### requests (usage, collator/data2 schema)
 ```sql
 CREATE TABLE requests (
     date DATE,
@@ -206,7 +206,7 @@ CREATE TABLE requests (
 ## Key Design Principles
 
 1. **Thread Safety**: All shared state protected by mutexes
-2. **Idempotency**: Usage upserts replace totals, not increment
+2. **Idempotency**: `data2` usage upserts replace per-node totals, while `data` flushes aggregated daily hits incrementally
 3. **Consensus**: Minimum 2 votes + majority for status changes
 4. **Hot Reload**: Remote configs refresh without restart
 5. **Deduplication**: One alert per outage, edited on recovery

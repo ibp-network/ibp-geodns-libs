@@ -81,6 +81,8 @@ func FindOpenOfflineEvent(memberName, checkType, checkName, domainName, endpoint
 		WHERE member_name = ? AND check_type = 'site' AND check_name = ? AND status = FALSE AND end_time IS NULL AND is_ipv6 = ?
 		`
 		row = DB.QueryRow(query, memberName, checkName, isIPv6)
+	} else {
+		return nil, fmt.Errorf("unsupported check type %q", checkType)
 	}
 
 	var event EventRecord
@@ -139,6 +141,9 @@ func GetEvents(memberName string, start, end time.Time) ([]EventRecord, error) {
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 		res = append(res, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
 	}
 	return res, nil
 }

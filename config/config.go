@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
@@ -13,19 +14,40 @@ import (
 
 var (
 	cfg *ConfigInit
+
+	cfgInitMu      sync.Mutex
+	configUpdaterC chan struct{}
+	configClient   = &http.Client{Timeout: 15 * time.Second}
 )
 
 func Init(cfgFile string) {
 	log.Log(log.Debug, "Config Package initializing...")
-	cfg = &ConfigInit{
-		cfgFile: cfgFile,
+
+	cfgInitMu.Lock()
+	defer cfgInitMu.Unlock()
+
+	if cfg == nil {
+		cfg = &ConfigInit{}
+	}
+	cfg.cfgFile = cfgFile
+
+	if configUpdaterC != nil {
+		close(configUpdaterC)
+		configUpdaterC = nil
 	}
 
 	loadConfig(cfgFile, true)
-	go configUpdater(cfgFile)
+
+	stop := make(chan struct{})
+	configUpdaterC = stop
+	go configUpdater(cfgFile, stop)
 }
 
 func loadConfig(cfgFile string, initialLoad bool) {
+	if cfg == nil {
+		return
+	}
+
 	cfg.mu.Lock()
 	defer cfg.mu.Unlock()
 
@@ -188,7 +210,7 @@ func loadServiceRequestsConfig(url string, initialLoad bool) {
 	var requests ServiceRequests
 	if err := json.Unmarshal(data, &requests); err != nil {
 		_, _, line, _ := runtime.Caller(2)
-		log.Log(log.Error, "Failed to unmarshal Services config Line: %d Error: %v", line, err)
+		log.Log(log.Error, "Failed to unmarshal ServiceRequests config Line: %d Error: %v", line, err)
 		if initialLoad {
 			log.Log(log.Fatal, "Terminating program due to critical error on initial load.")
 			os.Exit(1)
@@ -201,10 +223,6 @@ func loadServiceRequestsConfig(url string, initialLoad bool) {
 }
 
 func downloadConfig(url string, initialLoad bool) []byte {
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
-
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Log(log.Error, "Failed to create HTTP request for config from %s: %v", url, err)
@@ -216,7 +234,7 @@ func downloadConfig(url string, initialLoad bool) []byte {
 		return nil
 	}
 
-	resp, err := client.Do(req)
+	resp, err := configClient.Do(req)
 	if err != nil {
 		log.Log(log.Error, "Failed to download config from %s: %v", url, err)
 		if initialLoad {
@@ -252,33 +270,48 @@ func downloadConfig(url string, initialLoad bool) []byte {
 	return data
 }
 
-func configUpdater(cfgFile string) {
+func configUpdater(cfgFile string, stop <-chan struct{}) {
 	for {
 		c := GetConfig()
 		interval := c.Local.System.ConfigReloadTime
 		if interval <= 0 {
 			log.Log(log.Warn, "ConfigReloadTime <= 0; skipping reload, retrying in 30s")
-			time.Sleep(30 * time.Second)
-			continue
+			interval = 30
 		}
-		time.Sleep(interval * time.Second)
-		loadConfig(cfgFile, false)
+
+		timer := time.NewTimer(interval * time.Second)
+		select {
+		case <-stop:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-timer.C:
+			loadConfig(cfgFile, false)
+		}
 	}
 }
 
 func GetConfig() Config {
+	if cfg == nil {
+		return Config{}
+	}
+
 	cfg.mu.RLock()
 	defer cfg.mu.RUnlock()
 
-	var dataCopy Config
+	dataCopy := cfg.data
 	dataBytes, err := json.Marshal(cfg.data)
 	if err != nil {
 		log.Log(log.Error, "Failed to marshal configuration data: %v", err)
-	} else {
-		err = json.Unmarshal(dataBytes, &dataCopy)
-		if err != nil {
-			log.Log(log.Error, "Failed to unmarshal configuration data: %v", err)
-		}
+		return dataCopy
+	}
+
+	if err = json.Unmarshal(dataBytes, &dataCopy); err != nil {
+		log.Log(log.Error, "Failed to unmarshal configuration data: %v", err)
 	}
 
 	return dataCopy

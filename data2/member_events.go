@@ -3,6 +3,7 @@ package data2
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/ibp-network/ibp-geodns-libs/matrix"
@@ -63,10 +64,19 @@ func nullOrString(s string) sql.NullString {
 // -----------------------------------------------------------------------------
 
 func InsertNetStatus(rec NetStatusRecord) error {
-	jVotes, _ := json.Marshal(rec.VoteData)
-	jExtra, _ := json.Marshal(rec.Extra)
+	jVotes, err := json.Marshal(rec.VoteData)
+	if err != nil {
+		return fmt.Errorf("marshal vote data: %w", err)
+	}
+	jExtra, err := json.Marshal(rec.Extra)
+	if err != nil {
+		return fmt.Errorf("marshal extra data: %w", err)
+	}
 
 	ctString := ctToString(rec.CheckType)
+	if ctString == "unknown" {
+		return fmt.Errorf("unsupported check type %d", rec.CheckType)
+	}
 
 	// Ensure StartTime is UTC
 	if rec.StartTime.Location() != time.UTC {
@@ -81,7 +91,7 @@ func InsertNetStatus(rec NetStatusRecord) error {
 		  vote_data   = VALUES(vote_data),
 		  end_time    = IF(VALUES(status)=1,UTC_TIMESTAMP(),NULL)`
 
-	_, err := DB.Exec(q,
+	_, err = DB.Exec(q,
 		ctString,
 		rec.CheckName,
 		rec.CheckURL,
@@ -113,12 +123,15 @@ func InsertNetStatus(rec NetStatusRecord) error {
 
 func CloseOpenEvent(rec NetStatusRecord) error {
 	ctString := ctToString(rec.CheckType)
+	if ctString == "unknown" {
+		return fmt.Errorf("unsupported check type %d", rec.CheckType)
+	}
 
 	q := `UPDATE member_events
 		SET end_time = UTC_TIMESTAMP(), status = 1
 		WHERE check_type=? AND check_name=? AND endpoint=? AND domain_name=? AND member_name=? AND is_ipv6=? AND status=0 AND end_time IS NULL`
 
-	_, err := DB.Exec(q,
+	result, err := DB.Exec(q,
 		ctString,
 		rec.CheckName,
 		rec.CheckURL,
@@ -128,6 +141,14 @@ func CloseOpenEvent(rec NetStatusRecord) error {
 	)
 
 	if err == nil {
+		affected, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if affected == 0 {
+			return nil
+		}
+
 		// Outage resolved ⇒ notify
 		matrix.NotifyMemberOnline(
 			rec.Member,

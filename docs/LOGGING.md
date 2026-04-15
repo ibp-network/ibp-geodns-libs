@@ -20,7 +20,7 @@ const (
     Info                   // 1 - Informational messages
     Warn                   // 2 - Warning conditions
     Error                  // 3 - Error conditions
-    Fatal                  // 4 - Fatal errors (program termination)
+    Fatal                  // 4 - Highest-severity log level
 )
 ```
 
@@ -113,7 +113,7 @@ if debugMode {
 
 ### Thread Safety
 - Global logger instance
-- Mutex protection on level changes
+- Atomic protection on level changes
 - Safe for concurrent logging
 
 ## Best Practices
@@ -123,7 +123,7 @@ if debugMode {
    - Info: Normal operations, milestones
    - Warn: Recoverable issues, degraded performance
    - Error: Failures requiring attention
-   - Fatal: Unrecoverable errors
+   - Fatal: Highest-severity log messages; callers decide whether to exit
 
 2. **Include context** in error messages:
    ```go

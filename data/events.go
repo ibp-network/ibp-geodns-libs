@@ -5,14 +5,42 @@ import (
 	"encoding/json"
 	"time"
 
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
 	"github.com/ibp-network/ibp-geodns-libs/data/mysql"
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
 )
 
+const defaultMinimumOfflineTime = 30 * time.Second
+
+func minimumOfflineDuration() time.Duration {
+	c := cfg.GetConfig()
+	if secs := c.Local.System.MinimumOfflineTime; secs > 0 {
+		return time.Duration(secs) * time.Second
+	}
+	return defaultMinimumOfflineTime
+}
+
+func validCheckType(checkType string) bool {
+	switch checkType {
+	case "site", "domain", "endpoint":
+		return true
+	default:
+		return false
+	}
+}
+
 func RecordEvent(checkType, checkName, memberName, domainName, endpoint string, status bool, errorText string, data map[string]interface{}, isIPv6 bool) {
+	if !validCheckType(checkType) {
+		log.Log(log.Warn, "Skipping event with invalid check type %q for member=%s check=%s", checkType, memberName, checkName)
+		return
+	}
+
 	var additionalData string
 	if data != nil {
-		dataBytes, _ := json.Marshal(data)
+		dataBytes, err := json.Marshal(data)
+		if err != nil {
+			log.Log(log.Warn, "Failed to marshal event additional data for %s %s %s: %v", memberName, checkType, checkName, err)
+		}
 		additionalData = string(dataBytes)
 	}
 
@@ -25,7 +53,7 @@ func RecordEvent(checkType, checkName, memberName, domainName, endpoint string, 
 		if event != nil {
 			now := time.Now().UTC()
 			duration := now.Sub(event.StartTime)
-			if duration < 30*time.Second {
+			if duration < minimumOfflineDuration() {
 				err := mysql.DeleteEvent(event.ID)
 				if err != nil {
 					log.Log(log.Error, "Failed to delete short-duration event: %v", err)

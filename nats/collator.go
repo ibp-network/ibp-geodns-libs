@@ -44,6 +44,26 @@ func parseDateFlexible(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognised date format: %q", s)
 }
 
+func buildUsageRecord(nodeID string, r UsageRecord) (data2.UsageRecord, error) {
+	dt, err := parseDateFlexible(r.Date)
+	if err != nil {
+		return data2.UsageRecord{}, err
+	}
+
+	return data2.UsageRecord{
+		Date:        dt,
+		NodeID:      nodeID,
+		Domain:      r.Domain,
+		MemberName:  r.MemberName,
+		Asn:         r.Asn,
+		NetworkName: r.NetworkName,
+		CountryCode: r.CountryCode,
+		CountryName: r.CountryName,
+		IsIPv6:      r.IsIPv6,
+		Hits:        r.Hits,
+	}, nil
+}
+
 func handleUsageData(m *nats.Msg) {
 	var resp UsageResponse
 	if err := json.Unmarshal(m.Data, &resp); err != nil {
@@ -56,23 +76,12 @@ func handleUsageData(m *nats.Msg) {
 
 	records := make([]data2.UsageRecord, 0, len(resp.UsageRecords))
 	for _, r := range resp.UsageRecords {
-		dt, err := parseDateFlexible(r.Date)
+		record, err := buildUsageRecord(resp.NodeID, r)
 		if err != nil {
 			log.Log(log.Warn, "[collator] skipping record with invalid date %q: %v", r.Date, err)
 			continue
 		}
-		records = append(records, data2.UsageRecord{
-			Date:        dt,
-			NodeID:      resp.NodeID, // keep origin node
-			Domain:      r.Domain,
-			MemberName:  r.MemberName,
-			Asn:         r.Asn,
-			NetworkName: r.NetworkName,
-			CountryCode: r.CountryCode,
-			CountryName: r.CountryName,
-			IsIPv6:      false,
-			Hits:        r.Hits,
-		})
+		records = append(records, record)
 	}
 
 	if len(records) == 0 {
@@ -121,23 +130,12 @@ func collectOnce() {
 
 	records := make([]data2.UsageRecord, 0, len(raw))
 	for _, r := range raw {
-		dt, err := parseDateFlexible(r.Date)
+		record, err := buildUsageRecord(r.NodeID, r)
 		if err != nil {
 			log.Log(log.Warn, "[collator] skipping aggregated record with invalid date %q: %v", r.Date, err)
 			continue
 		}
-		records = append(records, data2.UsageRecord{
-			Date:        dt,
-			NodeID:      r.NodeID, // preserve DNS node‑id to keep rows unique
-			Domain:      r.Domain,
-			MemberName:  r.MemberName,
-			Asn:         r.Asn,
-			NetworkName: r.NetworkName,
-			CountryCode: r.CountryCode,
-			CountryName: r.CountryName,
-			IsIPv6:      false,
-			Hits:        r.Hits,
-		})
+		records = append(records, record)
 	}
 
 	if len(records) == 0 {
