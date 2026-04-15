@@ -8,7 +8,10 @@ func GetMember(name string) (Member, bool) {
 	cfg.mu.RLock()
 	member, exists := cfg.data.Members[name]
 	cfg.mu.RUnlock()
-	return member, exists
+	if !exists {
+		return Member{}, false
+	}
+	return cloneMember(member), true
 }
 
 func SetMember(name string, member Member) {
@@ -42,7 +45,7 @@ func ListMembers() map[string]Member {
 	cfg.mu.RLock()
 	membersCopy := make(map[string]Member, len(cfg.data.Members))
 	for k, v := range cfg.data.Members {
-		membersCopy[k] = v
+		membersCopy[k] = cloneMember(v)
 	}
 	cfg.mu.RUnlock()
 	return membersCopy
