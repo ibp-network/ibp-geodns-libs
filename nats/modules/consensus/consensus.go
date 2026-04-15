@@ -36,7 +36,7 @@ func ProposeCheckStatus(
 		status, errorText, dataMap, isIPv6)
 }
 
-func hasMatchingProposalLocked(state *core.NodeState, prop core.Proposal) bool {
+func findMatchingProposalLocked(state *core.NodeState, prop core.Proposal) *core.ProposalTracking {
 	for _, pt := range state.Proposals {
 		if !pt.Finalized &&
 			pt.Proposal.CheckType == prop.CheckType &&
@@ -46,11 +46,11 @@ func hasMatchingProposalLocked(state *core.NodeState, prop core.Proposal) bool {
 			pt.Proposal.Endpoint == prop.Endpoint &&
 			pt.Proposal.ProposedStatus == prop.ProposedStatus &&
 			pt.Proposal.IsIPv6 == prop.IsIPv6 {
-			return true
+			return pt
 		}
 	}
 
-	return false
+	return nil
 }
 
 func propose(
@@ -93,8 +93,10 @@ func propose(
 	if state.Proposals == nil {
 		state.Proposals = make(map[core.ProposalID]*core.ProposalTracking)
 	}
-	if hasMatchingProposalLocked(state, prop) {
+	if existing := findMatchingProposalLocked(state, prop); existing != nil {
+		existingProp := existing.Proposal
 		state.Mu.Unlock()
+		go voteOnProposal(deps, existingProp)
 		return
 	}
 	state.Proposals[pid] = pt

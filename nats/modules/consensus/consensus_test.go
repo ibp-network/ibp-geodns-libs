@@ -64,7 +64,7 @@ func TestProposeCheckStatusDeduplicatesConcurrentMatches(t *testing.T) {
 	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
 	dat.UpdateLocalEndpointResult(check, member, cfg.Service{}, "rpc.example.com", "wss://rpc.example.com/ws", false, "timeout", nil, true)
 
-	votePublished := make(chan struct{}, 4)
+	votePublished := make(chan struct{}, 8)
 	deps.Publish = func(subject string, data []byte) error {
 		if subject == deps.State.SubjectVote {
 			select {
@@ -96,10 +96,15 @@ func TestProposeCheckStatusDeduplicatesConcurrentMatches(t *testing.T) {
 	}
 	wg.Wait()
 
-	select {
-	case <-votePublished:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("expected deduplicated proposal to still trigger a vote")
+	receivedVotes := 0
+	timeout := time.After(500 * time.Millisecond)
+	for receivedVotes < 8 {
+		select {
+		case <-votePublished:
+			receivedVotes++
+		case <-timeout:
+			t.Fatalf("expected 8 vote attempts from deduplicated proposals, got %d", receivedVotes)
+		}
 	}
 
 	deps.State.Mu.RLock()
@@ -219,5 +224,83 @@ func TestHandleProposalVotesOnMatchingProposalWithDifferentID(t *testing.T) {
 	defer deps.State.Mu.RUnlock()
 	if got := len(deps.State.Proposals); got != 2 {
 		t.Fatalf("expected both local and remote proposals to be tracked, got %d proposals", got)
+	}
+}
+
+func TestProposeCheckStatusVotesOnExistingMatchingProposal(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	prevLocal := dat.Local
+	resetLocalResults()
+	defer func() {
+		dat.Local = prevLocal
+	}()
+
+	incoming := core.Proposal{
+		ID:             core.ProposalID("remote-proposal-id"),
+		SenderNodeID:   "monitor-b",
+		CheckType:      "endpoint",
+		CheckName:      "wss",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "wss://rpc.example.com/ws",
+		ProposedStatus: false,
+		ErrorText:      "timeout",
+		IsIPv6:         true,
+		Timestamp:      time.Now().UTC(),
+	}
+	deps.State.Proposals[incoming.ID] = &core.ProposalTracking{
+		Proposal: incoming,
+		Votes:    make(map[string]bool),
+	}
+
+	votePublished := make(chan core.Vote, 1)
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectVote {
+			var vote core.Vote
+			if err := json.Unmarshal(data, &vote); err == nil {
+				select {
+				case votePublished <- vote:
+				default:
+				}
+			}
+		}
+		return nil
+	}
+
+	check := cfg.Check{Name: "wss"}
+	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
+	dat.UpdateLocalEndpointResult(check, member, cfg.Service{}, "rpc.example.com", "wss://rpc.example.com/ws", false, "timeout", nil, true)
+
+	ProposeCheckStatus(
+		deps,
+		"endpoint",
+		"wss",
+		"provider1",
+		"rpc.example.com",
+		"wss://rpc.example.com/ws",
+		false,
+		"timeout",
+		nil,
+		true,
+	)
+
+	select {
+	case vote := <-votePublished:
+		if vote.ProposalID != incoming.ID {
+			t.Fatalf("expected vote for existing proposal id %s, got %s", incoming.ID, vote.ProposalID)
+		}
+		if vote.NodeID != deps.State.NodeID {
+			t.Fatalf("expected vote node %s, got %s", deps.State.NodeID, vote.NodeID)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected local catch-up propose to vote on existing matching proposal")
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if got := len(deps.State.Proposals); got != 1 {
+		t.Fatalf("expected existing proposal to be reused, got %d proposals", got)
 	}
 }
