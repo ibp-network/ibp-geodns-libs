@@ -103,6 +103,18 @@ func markConsensusSenderHeard(deps Dependencies, nodeID string) {
 	state.ClusterNodes[nodeID] = node
 }
 
+func recordLocalVoteLocked(deps Dependencies, vote core.Vote) bool {
+	state := deps.State
+	pt, ok := state.Proposals[vote.ProposalID]
+	if !ok || pt.Finalized {
+		return false
+	}
+
+	pt.Votes[vote.NodeID] = vote.Agree
+	decideLocked(deps, pt)
+	return true
+}
+
 func propose(
 	deps Dependencies,
 	checkType, checkName, memberName, domainName, endpoint string,
@@ -230,6 +242,13 @@ func voteOnProposal(deps Dependencies, prop core.Proposal) {
 	log.Log(log.Debug,
 		"[CONSENSUS]    vote id=%s agree=%v (local=%v proposed=%v)",
 		prop.ID, v.Agree, localStatus, prop.ProposedStatus)
+
+	state.Mu.Lock()
+	appliedLocally := recordLocalVoteLocked(deps, v)
+	state.Mu.Unlock()
+	if appliedLocally {
+		log.Log(log.Debug, "[CONSENSUS]    applied local vote immediately for id=%s node=%s", v.ProposalID, v.NodeID)
+	}
 
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -372,17 +391,17 @@ func finalize(deps Dependencies, pt *core.ProposalTracking) {
 		Passed:    pt.Passed,
 		DecidedAt: time.Now().UTC(),
 	}
+
+	if deps.OnFinalize != nil {
+		deps.OnFinalize(msg)
+		log.Log(log.Debug, "[CONSENSUS]    applied finalize locally for id=%s", pt.Proposal.ID)
+	}
+
 	data, err := json.Marshal(msg)
 	if err != nil {
 		log.Log(log.Error, "[NATS] failed to marshal finalize for %s: %v", pt.Proposal.ID, err)
-		if deps.OnFinalize != nil {
-			deps.OnFinalize(msg)
-		}
 	} else if deps.Publish(state.SubjectFinalize, data) != nil {
 		log.Log(log.Error, "[NATS] failed to publish finalize for %s", pt.Proposal.ID)
-		if deps.OnFinalize != nil {
-			deps.OnFinalize(msg)
-		}
 	}
 
 	state.Mu.Lock()

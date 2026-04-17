@@ -59,6 +59,7 @@ func onConsensusFinalize(fm core.FinalizeMessage) {
 func handleCollatorFinalize(fm core.FinalizeMessage) {
 	ct := checkTypeToInt(fm.Proposal.CheckType)
 	url := deriveCheckURL(fm.Proposal)
+	cachedProposal, hasCachedProposal := data2.PopProposal(string(fm.Proposal.ID))
 
 	rec := data2.NetStatusRecord{
 		CheckType: ct,
@@ -73,7 +74,9 @@ func handleCollatorFinalize(fm core.FinalizeMessage) {
 		rec.Status = false
 		rec.StartTime = fm.DecidedAt.UTC()
 		rec.Error = fm.Proposal.ErrorText
-		rec.VoteData = nil
+		if hasCachedProposal {
+			rec.VoteData = cachedProposal.VoteData
+		}
 		rec.Extra = fm.Proposal.Data
 
 		if err := data2.InsertNetStatus(rec); err != nil {

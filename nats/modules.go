@@ -34,6 +34,7 @@ func registerModules() {
 	modCollator.Register(messageRouter, modCollator.Dependencies{
 		Subjects:        subjects,
 		CacheProposal:   cacheCollatorProposal,
+		CacheVote:       cacheCollatorVote,
 		HandleFinalize:  handleFinalize,
 		HandleStatsData: handleMonitorStatsData,
 		HandleUsageData: handleUsageData,

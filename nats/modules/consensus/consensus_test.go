@@ -310,6 +310,12 @@ func TestHandleVoteBuffersUntilProposalArrives(t *testing.T) {
 	deps := newTestDependencies()
 	defer stopProposalTimers(deps.State)
 
+	prevLocal := dat.Local
+	resetLocalResults()
+	defer func() {
+		dat.Local = prevLocal
+	}()
+
 	incomingVote := core.Vote{
 		ProposalID:   core.ProposalID("remote-proposal-id"),
 		SenderNodeID: "monitor-b",
@@ -332,6 +338,21 @@ func TestHandleVoteBuffersUntilProposalArrives(t *testing.T) {
 	}
 	deps.State.Mu.RUnlock()
 
+	check := cfg.Check{Name: "http"}
+	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
+	dat.UpdateLocalDomainResult(check, member, cfg.Service{}, "rpc.example.com", true, "", nil, false)
+
+	votePublished := make(chan struct{}, 1)
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectVote {
+			select {
+			case votePublished <- struct{}{}:
+			default:
+			}
+		}
+		return nil
+	}
+
 	proposal := core.Proposal{
 		ID:             incomingVote.ProposalID,
 		SenderNodeID:   "monitor-b",
@@ -352,14 +373,18 @@ func TestHandleVoteBuffersUntilProposalArrives(t *testing.T) {
 
 	HandleProposal(deps, &nats.Msg{Data: proposalPayload})
 
+	select {
+	case <-votePublished:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected proposal arrival to trigger local vote processing")
+	}
+
 	deps.State.Mu.RLock()
 	defer deps.State.Mu.RUnlock()
-	pt, ok := deps.State.Proposals[incomingVote.ProposalID]
-	if !ok {
-		t.Fatalf("expected proposal to be tracked after arrival")
-	}
-	if got, ok := pt.Votes[incomingVote.NodeID]; !ok || !got {
-		t.Fatalf("expected buffered vote to be applied after proposal arrival")
+	if pt, ok := deps.State.Proposals[incomingVote.ProposalID]; ok {
+		if got, ok := pt.Votes[incomingVote.NodeID]; !ok || !got {
+			t.Fatalf("expected buffered vote to be applied after proposal arrival")
+		}
 	}
 	if _, ok := deps.State.PendingVotes[incomingVote.ProposalID]; ok {
 		t.Fatalf("expected buffered vote entry to be cleared after application")
@@ -411,5 +436,121 @@ func TestHandleVoteCountsMonitorByConsensusTrafficEvenWithoutMonitorNamedNodeID(
 	}
 	if got := deps.State.ClusterNodes["ROTKO"].NodeRole; got != "IBPMonitor" {
 		t.Fatalf("expected ROTKO to be classified as IBPMonitor, got %q", got)
+	}
+}
+
+func TestVoteOnProposalAppliesLocalVoteWithoutEcho(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	deps.CountActiveMonitors = func() int { return 1 }
+	deps.State.ClusterNodes[deps.State.NodeID] = core.NodeInfo{
+		NodeID:    deps.State.NodeID,
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+
+	prevLocal := dat.Local
+	resetLocalResults()
+	defer func() {
+		dat.Local = prevLocal
+	}()
+
+	check := cfg.Check{Name: "wss"}
+	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
+	dat.UpdateLocalEndpointResult(check, member, cfg.Service{}, "rpc.example.com", "wss://rpc.example.com/ws", false, "timeout", nil, true)
+
+	proposal := core.Proposal{
+		ID:             core.ProposalID("self-vote-no-echo"),
+		SenderNodeID:   deps.State.NodeID,
+		CheckType:      "endpoint",
+		CheckName:      "wss",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "wss://rpc.example.com/ws",
+		ProposedStatus: false,
+		ErrorText:      "timeout",
+		IsIPv6:         true,
+		Timestamp:      time.Now().UTC(),
+	}
+	deps.State.Proposals[proposal.ID] = &core.ProposalTracking{
+		Proposal: proposal,
+		Votes:    make(map[string]bool),
+	}
+
+	publishedVotes := 0
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectVote {
+			publishedVotes++
+		}
+		return nil
+	}
+
+	voteOnProposal(deps, proposal)
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	pt := deps.State.Proposals[proposal.ID]
+	if pt == nil {
+		t.Fatalf("expected proposal to remain tracked")
+	}
+	if got, ok := pt.Votes[deps.State.NodeID]; !ok || !got {
+		t.Fatalf("expected local vote to be recorded immediately")
+	}
+	if !pt.Finalized || !pt.Passed {
+		t.Fatalf("expected single active monitor to finalize after local vote")
+	}
+	if publishedVotes != 1 {
+		t.Fatalf("expected vote to still be published to NATS, got %d publishes", publishedVotes)
+	}
+}
+
+func TestFinalizeAppliesLocallyWithoutEcho(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	applied := make(chan core.FinalizeMessage, 1)
+	deps.OnFinalize = func(msg core.FinalizeMessage) {
+		select {
+		case applied <- msg:
+		default:
+		}
+	}
+
+	publishedFinalize := 0
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectFinalize {
+			publishedFinalize++
+		}
+		return nil
+	}
+
+	pt := &core.ProposalTracking{
+		Proposal: core.Proposal{
+			ID: core.ProposalID("finalize-local"),
+		},
+		Passed: true,
+	}
+	deps.State.Proposals[pt.Proposal.ID] = pt
+
+	finalize(deps, pt)
+
+	select {
+	case msg := <-applied:
+		if msg.Proposal.ID != pt.Proposal.ID || !msg.Passed {
+			t.Fatalf("expected local finalize callback for %s, got %+v", pt.Proposal.ID, msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("expected finalize to apply locally without waiting for echo")
+	}
+
+	if publishedFinalize != 1 {
+		t.Fatalf("expected finalize to still be published once, got %d", publishedFinalize)
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if _, ok := deps.State.Proposals[pt.Proposal.ID]; ok {
+		t.Fatalf("expected finalized proposal to be removed from in-memory state")
 	}
 }

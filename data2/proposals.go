@@ -13,6 +13,20 @@ var (
 
 func CacheProposal(p Proposal) {
 	memMu.Lock()
+	if existing, ok := memStore[p.ID]; ok {
+		if p.VoteData == nil && existing.VoteData != nil {
+			p.VoteData = make(map[string]bool, len(existing.VoteData))
+			for nodeID, agree := range existing.VoteData {
+				p.VoteData[nodeID] = agree
+			}
+		}
+		if p.CreatedAt.IsZero() {
+			p.CreatedAt = existing.CreatedAt
+		}
+	}
+	if p.VoteData == nil {
+		p.VoteData = make(map[string]bool)
+	}
 	memStore[p.ID] = p
 	memMu.Unlock()
 }
@@ -36,6 +50,26 @@ func ExpireStaleProposals() {
 		}
 	}
 	memMu.Unlock()
+}
+
+func RecordProposalVote(id, nodeID string, agree bool) int {
+	memMu.Lock()
+	defer memMu.Unlock()
+
+	p, ok := memStore[id]
+	if !ok {
+		p = Proposal{
+			ID:        id,
+			CreatedAt: time.Now().UTC(),
+			VoteData:  make(map[string]bool),
+		}
+	}
+	if p.VoteData == nil {
+		p.VoteData = make(map[string]bool)
+	}
+	p.VoteData[nodeID] = agree
+	memStore[id] = p
+	return len(p.VoteData)
 }
 
 func StoreProposal(p Proposal) error { CacheProposal(p); return nil }

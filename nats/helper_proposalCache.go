@@ -35,3 +35,19 @@ func cacheCollatorProposal(m *nats.Msg) {
 	log.Log(log.Debug, "[collator] cached proposal id=%s member=%s type=%s v6=%v",
 		p.ID, p.MemberName, p.CheckType, p.IsIPv6)
 }
+
+func cacheCollatorVote(m *nats.Msg) {
+	var v Vote
+	if err := json.Unmarshal(m.Data, &v); err != nil {
+		log.Log(log.Error, "[collator] vote unmarshal error: %v", err)
+		return
+	}
+
+	if v.SenderNodeID != "" {
+		markNodeHeard(v.SenderNodeID)
+	}
+
+	voteCount := data2.RecordProposalVote(string(v.ProposalID), v.NodeID, v.Agree)
+	log.Log(log.Debug, "[collator] cached vote proposal=%s from=%s agree=%v totalVotes=%d",
+		v.ProposalID, v.NodeID, v.Agree, voteCount)
+}

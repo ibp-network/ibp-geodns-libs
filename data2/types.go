@@ -50,6 +50,7 @@ type Proposal struct {
 	Domain    string    `json:"Domain,omitempty"`
 	Member    string    `json:"Member,omitempty"`
 	CreatedAt time.Time `json:"CreatedAt,omitempty"`
+	VoteData  map[string]bool `json:"VoteData,omitempty"`
 }
 
 type ProposalTracking struct {

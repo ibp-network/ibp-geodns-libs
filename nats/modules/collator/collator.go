@@ -11,6 +11,7 @@ import (
 type Dependencies struct {
 	Subjects        SubjectProvider
 	CacheProposal   func(*nats.Msg)
+	CacheVote       func(*nats.Msg)
 	HandleFinalize  func(*nats.Msg)
 	HandleStatsData func(*nats.Msg)
 	HandleUsageData func(*nats.Msg)
@@ -55,11 +56,16 @@ func (m module) Handle(msg *nats.Msg) bool {
 		return true
 	}
 
-	propose, _, finalize := m.subjectStrings()
+	propose, vote, finalize := m.subjectStrings()
 	switch subj {
 	case propose:
 		if m.deps.CacheProposal != nil {
 			m.deps.CacheProposal(msg)
+			return true
+		}
+	case vote:
+		if m.deps.CacheVote != nil {
+			m.deps.CacheVote(msg)
 			return true
 		}
 	case finalize:
