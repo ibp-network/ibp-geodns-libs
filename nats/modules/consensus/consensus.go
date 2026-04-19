@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	minConsensusVotes         = 1
+	minConsensusVotes         = 2
 	proposalRepublishInterval = 10 * time.Second
 )
 
@@ -343,7 +343,7 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 func decideLocked(deps Dependencies, pt *core.ProposalTracking) {
 	state := deps.State
 	total := countActiveMonitorsLocked(state, deps.IsNodeActive)
-	if total == 0 {
+	if total < minConsensusVotes {
 		return
 	}
 	maj := (total / 2) + 1

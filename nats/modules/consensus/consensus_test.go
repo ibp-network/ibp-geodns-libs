@@ -605,8 +605,8 @@ func TestVoteOnProposalAppliesLocalVoteWithoutEcho(t *testing.T) {
 	if got, ok := pt.Votes[deps.State.NodeID]; !ok || !got {
 		t.Fatalf("expected local vote to be recorded immediately")
 	}
-	if !pt.Finalized || !pt.Passed {
-		t.Fatalf("expected single active monitor to finalize after local vote")
+	if pt.Finalized {
+		t.Fatalf("expected single active monitor to keep proposal pending until quorum is met")
 	}
 	if publishedVotes != 1 {
 		t.Fatalf("expected vote to still be published to NATS, got %d publishes", publishedVotes)
