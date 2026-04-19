@@ -17,6 +17,7 @@ const (
 	activeNodeWindow        = 10 * time.Minute
 	broadcastJoinRetryCount = 3
 	broadcastJoinDelay      = 500 * time.Millisecond
+	joinThrottleWindow      = 5 * time.Second
 )
 
 var (
@@ -80,7 +81,7 @@ func enableRoleInternal(role string) error {
 
 	go func() {
 		for i := 0; i < broadcastJoinRetryCount; i++ {
-			broadcastClusterJoin()
+			broadcastClusterJoin(true)
 			time.Sleep(broadcastJoinDelay)
 		}
 	}()
@@ -94,31 +95,35 @@ func startHeartbeat() {
 		t := time.NewTicker(90 * time.Second)
 		defer t.Stop()
 		for range t.C {
-			State.Mu.Lock()
-			if me, ok := State.ClusterNodes[State.NodeID]; ok {
-				me.LastHeard = time.Now().UTC()
-				State.ClusterNodes[State.NodeID] = me
-			}
-			State.Mu.Unlock()
-			broadcastClusterJoin()
+			broadcastClusterJoin(false)
 		}
 	}()
 }
 
-func broadcastClusterJoin() {
-	now := time.Now().UnixNano()
-	if last := atomic.LoadInt64(&lastJoin); last != 0 && now-last < 5*int64(time.Second) {
-		return
+func broadcastClusterJoin(force bool) {
+	now := time.Now().UTC()
+	nowUnix := now.UnixNano()
+	if !force {
+		if last := atomic.LoadInt64(&lastJoin); last != 0 && nowUnix-last < int64(joinThrottleWindow) {
+			return
+		}
 	}
-	atomic.StoreInt64(&lastJoin, now)
+	atomic.StoreInt64(&lastJoin, nowUnix)
 
+	State.Mu.Lock()
 	if State.ThisNode.NodeID == "" {
+		State.Mu.Unlock()
 		log.Log(log.Error, "[NATS] JOIN suppressed – NodeID is empty; role not fully active (refuse to proceed)")
 		return
 	}
+	State.ThisNode.LastHeard = now
+	State.ClusterNodes[State.NodeID] = State.ThisNode
+	sender := State.ThisNode
+	State.Mu.Unlock()
+
 	msg := ClusterMessage{
 		Type:   "join",
-		Sender: State.ThisNode,
+		Sender: sender,
 	}
 	data, _ := json.Marshal(msg)
 	if err := Publish(State.SubjectCluster, data); err != nil {
@@ -154,29 +159,59 @@ func handleClusterMessage(m *nats.Msg) {
 		return
 	}
 
-	markNodeHeard(msg.Sender.NodeID)
+	wasNew := markNodeHeardWithState(msg.Sender.NodeID)
 
 	if msg.Type == "join" {
-		addNode(msg.Sender)
+		updated := addNode(msg.Sender)
+		if msg.Sender.NodeID != State.NodeID && (wasNew || updated) {
+			go broadcastClusterJoin(true)
+		}
 	}
 }
 
-func addNode(n NodeInfo) {
+func addNode(n NodeInfo) bool {
 	State.Mu.Lock()
 	defer State.Mu.Unlock()
 
 	if n.NodeID == "" {
-		return
+		return false
 	}
 	cur, exists := State.ClusterNodes[n.NodeID]
-	if !exists || (cur.NodeRole == "" && n.NodeRole != "") {
+	if !exists {
 		State.ClusterNodes[n.NodeID] = n
+		return true
 	}
+
+	updated := false
+	if cur.NodeRole == "" && n.NodeRole != "" {
+		cur.NodeRole = n.NodeRole
+		updated = true
+	}
+	if cur.PublicAddress == "" && n.PublicAddress != "" {
+		cur.PublicAddress = n.PublicAddress
+		updated = true
+	}
+	if cur.ListenAddress == "" && n.ListenAddress != "" {
+		cur.ListenAddress = n.ListenAddress
+		updated = true
+	}
+	if cur.ListenPort == "" && n.ListenPort != "" {
+		cur.ListenPort = n.ListenPort
+		updated = true
+	}
+	if updated {
+		State.ClusterNodes[n.NodeID] = cur
+	}
+	return updated
 }
 
 func markNodeHeard(id string) {
+	_ = markNodeHeardWithState(id)
+}
+
+func markNodeHeardWithState(id string) bool {
 	if id == "" {
-		return
+		return false
 	}
 	State.Mu.Lock()
 	defer State.Mu.Unlock()
@@ -190,6 +225,7 @@ func markNodeHeard(id string) {
 	}
 	n.LastHeard = time.Now().UTC()
 	State.ClusterNodes[id] = n
+	return !exists
 }
 
 func guessRoleFromID(id string) string {
