@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	data2 "github.com/ibp-network/ibp-geodns-libs/data2"
 	natsserver "github.com/nats-io/nats-server/v2/server"
 	natsio "github.com/nats-io/nats.go"
 )
@@ -146,5 +147,97 @@ func TestEnableRoleBootstrapsClusterVisibility(t *testing.T) {
 	response := collectClusterMessages(clusterMsgs, 750*time.Millisecond)
 	if got := countJoinMessages(response, "node-a"); got == 0 {
 		t.Fatalf("expected node-a to answer a new peer JOIN with its own JOIN, got %+v", response)
+	}
+}
+
+func TestCollatorCachesProposalBurst(t *testing.T) {
+	srv := runRoleTestServer(t)
+
+	libConn, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect library client: %v", err)
+	}
+	connectionMu.Lock()
+	nc = libConn
+	NC = libConn
+	connectionMu.Unlock()
+	t.Cleanup(func() {
+		Disconnect()
+		State = NodeState{}
+		atomic.StoreInt64(&lastJoin, 0)
+	})
+
+	publisher, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect publisher client: %v", err)
+	}
+	t.Cleanup(func() {
+		publisher.Close()
+	})
+
+	State = NodeState{}
+	atomic.StoreInt64(&lastJoin, 0)
+	State.NodeID = "IBP-COLLATOR"
+	State.ThisNode = NodeInfo{
+		NodeID:        "IBP-COLLATOR",
+		ListenAddress: "127.0.0.1",
+		ListenPort:    "9000",
+		NodeRole:      "IBPCollator",
+	}
+
+	if err := EnableCollatorRole(); err != nil {
+		t.Fatalf("enable collator role: %v", err)
+	}
+
+	const proposalCount = 100
+	ids := make([]string, 0, proposalCount)
+	for i := 0; i < proposalCount; i++ {
+		id := "burst-proposal-" + time.Now().UTC().Format("150405.000000000") + "-" + string(rune('A'+(i%26))) + "-" + string(rune('a'+((i/26)%26)))
+		ids = append(ids, id)
+		payload, err := json.Marshal(Proposal{
+			ID:             ProposalID(id),
+			SenderNodeID:   "STAKEPLUS",
+			CheckType:      "endpoint",
+			CheckName:      "wss",
+			MemberName:     "member-" + id,
+			DomainName:     "domain.example",
+			Endpoint:       "wss://domain.example",
+			ProposedStatus: true,
+			Data:           map[string]interface{}{"Peers": true},
+			IsIPv6:         false,
+			Timestamp:      time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("marshal proposal %d: %v", i, err)
+		}
+		if err := publisher.Publish("consensus.propose", payload); err != nil {
+			t.Fatalf("publish proposal %d: %v", i, err)
+		}
+	}
+	if err := publisher.Flush(); err != nil {
+		t.Fatalf("flush proposals: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	seen := make(map[string]struct{}, proposalCount)
+	for len(seen) < proposalCount && time.Now().Before(deadline) {
+		for _, id := range ids {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			if proposal, ok := data2.PopProposal(id); ok {
+				seen[id] = struct{}{}
+				if proposal.ID != id {
+					t.Fatalf("expected proposal id %s, got %s", id, proposal.ID)
+				}
+			}
+		}
+		if len(seen) < proposalCount {
+			time.Sleep(25 * time.Millisecond)
+		}
+	}
+
+	if len(seen) != proposalCount {
+		t.Fatalf("expected collator to cache %d proposals, cached %d", proposalCount, len(seen))
 	}
 }

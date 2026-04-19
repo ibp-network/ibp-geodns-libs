@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -110,4 +111,65 @@ func TestSubscribeDoesNotSerializeCallbacks(t *testing.T) {
 	}
 
 	releaseOnce.Do(func() { close(releaseFirst) })
+}
+
+func TestPublishDeliversConcurrentBurst(t *testing.T) {
+	srv := runRoleTestServer(t)
+
+	libConn, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect library client: %v", err)
+	}
+	connectionMu.Lock()
+	nc = libConn
+	NC = libConn
+	connectionMu.Unlock()
+	t.Cleanup(func() {
+		Disconnect()
+	})
+
+	subscriber, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect subscriber client: %v", err)
+	}
+	t.Cleanup(func() {
+		subscriber.Close()
+	})
+
+	msgs := make(chan *natsio.Msg, 512)
+	sub, err := subscriber.ChanSubscribe("consensus.propose", msgs)
+	if err != nil {
+		t.Fatalf("subscribe raw client: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sub.Unsubscribe()
+	})
+	if err := subscriber.Flush(); err != nil {
+		t.Fatalf("flush subscriber: %v", err)
+	}
+
+	const burst = 100
+	var wg sync.WaitGroup
+	for i := 0; i < burst; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			payload := []byte(fmt.Sprintf(`{"ID":"proposal-%d","ErrorText":"%s"}`, i, "HTTP error 502: <html><body>bad gateway</body></html>"))
+			if err := Publish("consensus.propose", payload); err != nil {
+				t.Errorf("publish %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	received := 0
+	deadline := time.After(5 * time.Second)
+	for received < burst {
+		select {
+		case <-msgs:
+			received++
+		case <-deadline:
+			t.Fatalf("expected %d published messages, received %d", burst, received)
+		}
+	}
 }

@@ -132,21 +132,23 @@ func broadcastClusterJoin(force bool) {
 }
 
 func handleAllMessages(m *nats.Msg) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Log(log.Error, "[NATS] message handler panic for %s: %v", m.Subject, r)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Log(log.Error, "[NATS] message handler panic for %s: %v", m.Subject, r)
+			}
+		}()
+
+		subj := m.Subject
+		if subj == State.SubjectCluster {
+			handleClusterMessage(m)
+			return
+		}
+
+		if !messageRouter.Dispatch(State.ThisNode.NodeRole, m) && strings.HasPrefix(subj, "consensus.") {
+			log.Log(log.Debug, "[NATS] unhandled consensus subject %s for role=%s", subj, State.ThisNode.NodeRole)
 		}
 	}()
-
-	subj := m.Subject
-	if subj == State.SubjectCluster {
-		handleClusterMessage(m)
-		return
-	}
-
-	if !messageRouter.Dispatch(State.ThisNode.NodeRole, m) && strings.HasPrefix(subj, "consensus.") {
-		log.Log(log.Debug, "[NATS] unhandled consensus subject %s for role=%s", subj, State.ThisNode.NodeRole)
-	}
 }
 
 func handleClusterMessage(m *nats.Msg) {
