@@ -294,6 +294,48 @@ func TestProposeCheckStatusRepublishesUnresolvedLocalProposalAfterInterval(t *te
 	}
 }
 
+func TestProposeCheckStatusPublishesDistinctProposals(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	published := 0
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectPropose {
+			published++
+		}
+		return nil
+	}
+
+	const proposalCount = 64
+	for i := 0; i < proposalCount; i++ {
+		memberName := "member-" + string(rune('A'+(i%26))) + string(rune('a'+((i/26)%26)))
+		domainName := "domain-" + string(rune('A'+(i%26))) + ".example.com"
+		endpoint := "wss://" + domainName + "/rpc/" + string(rune('0'+(i%10)))
+		ProposeCheckStatus(
+			deps,
+			"endpoint",
+			"wss",
+			memberName,
+			domainName,
+			endpoint,
+			i%2 == 0,
+			"",
+			nil,
+			false,
+		)
+	}
+
+	if published != proposalCount {
+		t.Fatalf("expected %d distinct proposals to publish, got %d", proposalCount, published)
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if got := len(deps.State.Proposals); got != proposalCount {
+		t.Fatalf("expected %d tracked proposals, got %d", proposalCount, got)
+	}
+}
+
 func TestProposeCheckStatusVotesOnExistingMatchingProposal(t *testing.T) {
 	deps := newTestDependencies()
 	defer stopProposalTimers(deps.State)
@@ -568,6 +610,153 @@ func TestVoteOnProposalAppliesLocalVoteWithoutEcho(t *testing.T) {
 	}
 	if publishedVotes != 1 {
 		t.Fatalf("expected vote to still be published to NATS, got %d publishes", publishedVotes)
+	}
+}
+
+func TestVoteOnProposalWithLockingCountFunctionDoesNotDeadlock(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	deps.CountActiveMonitors = func() int {
+		deps.State.Mu.RLock()
+		defer deps.State.Mu.RUnlock()
+		count := 0
+		for _, node := range deps.State.ClusterNodes {
+			if node.NodeRole == "IBPMonitor" && deps.IsNodeActive(node) {
+				count++
+			}
+		}
+		return count
+	}
+	deps.State.ClusterNodes[deps.State.NodeID] = core.NodeInfo{
+		NodeID:    deps.State.NodeID,
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+
+	prevLocal := dat.Local
+	resetLocalResults()
+	defer func() {
+		dat.Local = prevLocal
+	}()
+
+	check := cfg.Check{Name: "wss"}
+	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
+	dat.UpdateLocalEndpointResult(check, member, cfg.Service{}, "rpc.example.com", "wss://rpc.example.com/ws", false, "timeout", nil, true)
+
+	proposal := core.Proposal{
+		ID:             core.ProposalID("locking-count-local-vote"),
+		SenderNodeID:   deps.State.NodeID,
+		CheckType:      "endpoint",
+		CheckName:      "wss",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "wss://rpc.example.com/ws",
+		ProposedStatus: false,
+		ErrorText:      "timeout",
+		IsIPv6:         true,
+		Timestamp:      time.Now().UTC(),
+	}
+	deps.State.Proposals[proposal.ID] = &core.ProposalTracking{
+		Proposal: proposal,
+		Votes:    make(map[string]bool),
+	}
+
+	votePublished := make(chan struct{}, 1)
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectVote {
+			select {
+			case votePublished <- struct{}{}:
+			default:
+			}
+		}
+		return nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		voteOnProposal(deps, proposal)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected voteOnProposal to complete without deadlocking")
+	}
+
+	select {
+	case <-votePublished:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected voteOnProposal to publish a vote")
+	}
+}
+
+func TestHandleVoteWithLockingCountFunctionDoesNotDeadlock(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	deps.CountActiveMonitors = func() int {
+		deps.State.Mu.RLock()
+		defer deps.State.Mu.RUnlock()
+		count := 0
+		for _, node := range deps.State.ClusterNodes {
+			if node.NodeRole == "IBPMonitor" && deps.IsNodeActive(node) {
+				count++
+			}
+		}
+		return count
+	}
+
+	deps.State.ClusterNodes[deps.State.NodeID] = core.NodeInfo{
+		NodeID:    deps.State.NodeID,
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+	deps.State.ClusterNodes["monitor-b"] = core.NodeInfo{
+		NodeID:    "monitor-b",
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+
+	proposalID := core.ProposalID("locking-count-remote-vote")
+	deps.State.Proposals[proposalID] = &core.ProposalTracking{
+		Proposal: core.Proposal{
+			ID:           proposalID,
+			SenderNodeID: deps.State.NodeID,
+		},
+		Votes: map[string]bool{
+			deps.State.NodeID: true,
+		},
+	}
+
+	payload, err := json.Marshal(core.Vote{
+		ProposalID:   proposalID,
+		SenderNodeID: "monitor-b",
+		NodeID:       "monitor-b",
+		Agree:        true,
+		Timestamp:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal vote: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		HandleVote(deps, &nats.Msg{Data: payload})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected HandleVote to complete without deadlocking")
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if !deps.State.Proposals[proposalID].Finalized {
+		t.Fatal("expected remote vote to finalize proposal once quorum is reached")
 	}
 }
 

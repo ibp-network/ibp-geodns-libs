@@ -88,6 +88,16 @@ func applyPendingVotesLocked(deps Dependencies, pt *core.ProposalTracking) int {
 	return applied
 }
 
+func countActiveMonitorsLocked(state *core.NodeState, isNodeActive func(core.NodeInfo) bool) int {
+	count := 0
+	for _, node := range state.ClusterNodes {
+		if node.NodeRole == "IBPMonitor" && isNodeActive(node) {
+			count++
+		}
+	}
+	return count
+}
+
 func markConsensusSenderHeard(deps Dependencies, nodeID string) {
 	if nodeID == "" {
 		return
@@ -332,7 +342,7 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 
 func decideLocked(deps Dependencies, pt *core.ProposalTracking) {
 	state := deps.State
-	total := deps.CountActiveMonitors()
+	total := countActiveMonitorsLocked(state, deps.IsNodeActive)
 	if total == 0 {
 		return
 	}
@@ -379,7 +389,7 @@ func forceFinalize(deps Dependencies, pid core.ProposalID) {
 	decideLocked(deps, pt)
 	if !pt.Finalized {
 		// No decision yet (e.g., zero monitors). Resolve as failed to avoid leaks.
-		if deps.CountActiveMonitors() == 0 {
+		if countActiveMonitorsLocked(state, deps.IsNodeActive) == 0 {
 			pt.Finalized = true
 			pt.Passed = false
 			state.Mu.Unlock()
