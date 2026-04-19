@@ -63,6 +63,7 @@ func Connect() error {
 	c := cfg.GetConfig()
 	opts := []nats.Option{
 		nats.UserInfo(c.Local.Nats.User, c.Local.Nats.Pass),
+		nats.NoEcho(),
 		nats.MaxReconnects(-1),
 		nats.ReconnectWait(2 * time.Second),
 		nats.Timeout(10 * time.Second),

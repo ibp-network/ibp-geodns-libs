@@ -226,8 +226,8 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 		return
 	}
 	log.Log(log.Debug,
-		"[CONSENSUS] ← PROPOSAL received id=%s type=%s member=%s status=%v v6=%v",
-		prop.ID, prop.CheckType, prop.MemberName, prop.ProposedStatus, prop.IsIPv6)
+		"[CONSENSUS] ← PROPOSAL received id=%s from=%s type=%s check=%s member=%s domain=%s endpoint=%s status=%v v6=%v",
+		prop.ID, prop.SenderNodeID, prop.CheckType, prop.CheckName, prop.MemberName, prop.DomainName, prop.Endpoint, prop.ProposedStatus, prop.IsIPv6)
 	markConsensusSenderHeard(deps, prop.SenderNodeID)
 
 	state.Mu.Lock()
@@ -302,6 +302,9 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 		return
 	}
 	log.Log(log.Debug, "[CONSENSUS] ← vote id=%s from=%s agree=%v", v.ProposalID, v.NodeID, v.Agree)
+	log.Log(log.Debug,
+		"[CONSENSUS]    vote sender=%s proposal=%s voter=%s agree=%v",
+		v.SenderNodeID, v.ProposalID, v.NodeID, v.Agree)
 	markConsensusSenderHeard(deps, v.SenderNodeID)
 
 	state.Mu.Lock()
