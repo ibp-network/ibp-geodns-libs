@@ -24,6 +24,9 @@ func CacheProposal(p Proposal) {
 			p.CreatedAt = existing.CreatedAt
 		}
 	}
+	if p.CreatedAt.IsZero() {
+		p.CreatedAt = time.Now().UTC()
+	}
 	if p.VoteData == nil {
 		p.VoteData = make(map[string]bool)
 	}

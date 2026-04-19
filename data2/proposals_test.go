@@ -91,3 +91,24 @@ func TestRecordProposalVoteUpdatesVoteMap(t *testing.T) {
 		t.Fatalf("expected new vote to be stored")
 	}
 }
+
+func TestCacheProposalAssignsCreatedAtWhenTimestampMissing(t *testing.T) {
+	previous := snapshotProposalStore()
+	t.Cleanup(func() { restoreProposalStore(previous) })
+
+	restoreProposalStore(nil)
+
+	CacheProposal(Proposal{
+		ID:           "proposal-zero-created-at",
+		SenderNodeID: "STAKEPLUS",
+		MemberName:   "provider1",
+	})
+
+	proposal, ok := PopProposal("proposal-zero-created-at")
+	if !ok {
+		t.Fatal("expected proposal to exist after caching")
+	}
+	if proposal.CreatedAt.IsZero() {
+		t.Fatal("expected CacheProposal to assign a CreatedAt timestamp")
+	}
+}

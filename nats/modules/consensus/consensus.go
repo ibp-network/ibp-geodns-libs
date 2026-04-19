@@ -110,6 +110,9 @@ func markConsensusSenderHeard(deps Dependencies, nodeID string) {
 	state := deps.State
 	state.Mu.Lock()
 	defer state.Mu.Unlock()
+	if state.ClusterNodes == nil {
+		state.ClusterNodes = make(map[string]core.NodeInfo)
+	}
 
 	node, ok := state.ClusterNodes[nodeID]
 	if !ok {
@@ -241,6 +244,9 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 	markConsensusSenderHeard(deps, prop.SenderNodeID)
 
 	state.Mu.Lock()
+	if state.Proposals == nil {
+		state.Proposals = make(map[core.ProposalID]*core.ProposalTracking)
+	}
 	if _, exists := state.Proposals[prop.ID]; exists {
 		state.Mu.Unlock()
 		return

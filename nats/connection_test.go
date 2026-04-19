@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
 	natsio "github.com/nats-io/nats.go"
 )
 
@@ -36,6 +37,24 @@ func TestCloneNatsMsgDeepCopiesPayload(t *testing.T) {
 	}
 	if original.Header["X-Test"][0] != "a" {
 		t.Fatalf("expected original headers to remain unchanged, got %q", original.Header["X-Test"][0])
+	}
+}
+
+func TestValidateNatsConfigRejectsEmptyURL(t *testing.T) {
+	err := validateNatsConfig(cfg.Config{})
+	if err == nil {
+		t.Fatal("expected empty NATS URL to be rejected")
+	}
+}
+
+func TestValidateNatsConfigAcceptsConfiguredURL(t *testing.T) {
+	err := validateNatsConfig(cfg.Config{
+		Local: cfg.LocalConfig{
+			Nats: cfg.NatsConfig{Url: "nats://127.0.0.1:4222"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected configured NATS URL to pass validation, got %v", err)
 	}
 }
 

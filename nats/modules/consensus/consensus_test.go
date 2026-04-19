@@ -151,6 +151,53 @@ func TestHandleProposalIgnoresDuplicateProposalID(t *testing.T) {
 	}
 }
 
+func TestHandleProposalInitializesNilMaps(t *testing.T) {
+	deps := Dependencies{
+		State: &core.NodeState{
+			NodeID:          "monitor-a",
+			ProposalTimeout: time.Minute,
+			SubjectPropose:  "consensus.propose",
+			SubjectVote:     "consensus.vote",
+			SubjectFinalize: "consensus.finalize",
+		},
+		Publish:             func(string, []byte) error { return nil },
+		CountActiveMonitors: func() int { return 0 },
+		IsNodeActive:        func(core.NodeInfo) bool { return true },
+	}
+
+	payload, err := json.Marshal(core.Proposal{
+		ID:             core.ProposalID("nil-map-proposal"),
+		SenderNodeID:   "monitor-b",
+		CheckType:      "endpoint",
+		CheckName:      "wss",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "wss://rpc.example.com/ws",
+		ProposedStatus: true,
+		Timestamp:      time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal proposal: %v", err)
+	}
+
+	HandleProposal(deps, &nats.Msg{Data: payload})
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if deps.State.Proposals == nil {
+		t.Fatal("expected proposal map to be initialized")
+	}
+	if deps.State.ClusterNodes == nil {
+		t.Fatal("expected cluster node map to be initialized")
+	}
+	if got := len(deps.State.Proposals); got != 1 {
+		t.Fatalf("expected one tracked proposal, got %d", got)
+	}
+	if got := deps.State.ClusterNodes["monitor-b"].NodeRole; got != "IBPMonitor" {
+		t.Fatalf("expected remote sender to be marked as IBPMonitor, got %q", got)
+	}
+}
+
 func TestHandleProposalVotesOnMatchingProposalWithDifferentID(t *testing.T) {
 	deps := newTestDependencies()
 	defer stopProposalTimers(deps.State)

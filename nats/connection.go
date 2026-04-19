@@ -52,6 +52,13 @@ func currentConnection() *nats.Conn {
 	return conn
 }
 
+func validateNatsConfig(c cfg.Config) error {
+	if strings.TrimSpace(c.Local.Nats.Url) == "" {
+		return fmt.Errorf("nats url is empty; ensure config.Init ran and Local.Nats.Url is set")
+	}
+	return nil
+}
+
 func Connect() error {
 	connectionMu.Lock()
 	defer connectionMu.Unlock()
@@ -61,6 +68,9 @@ func Connect() error {
 	}
 
 	c := cfg.GetConfig()
+	if err := validateNatsConfig(c); err != nil {
+		return err
+	}
 	opts := []nats.Option{
 		nats.UserInfo(c.Local.Nats.User, c.Local.Nats.Pass),
 		nats.NoEcho(),

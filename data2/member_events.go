@@ -59,6 +59,10 @@ func nullOrString(s string) sql.NullString {
 	return sql.NullString{String: s, Valid: true}
 }
 
+func shouldNotifyOffline(status bool, rowsAffected int64) bool {
+	return !status && rowsAffected == 1
+}
+
 // -----------------------------------------------------------------------------
 // DB OPERATIONS + MATRIX NOTIFICATIONS
 // -----------------------------------------------------------------------------
@@ -91,7 +95,7 @@ func InsertNetStatus(rec NetStatusRecord) error {
 		  vote_data   = VALUES(vote_data),
 		  end_time    = IF(VALUES(status)=1,UTC_TIMESTAMP(),NULL)`
 
-	_, err = DB.Exec(q,
+	result, err := DB.Exec(q,
 		ctString,
 		rec.CheckName,
 		rec.CheckURL,
@@ -105,17 +109,23 @@ func InsertNetStatus(rec NetStatusRecord) error {
 		string(jExtra),
 	)
 
-	if err == nil && !rec.Status {
-		// New outage ⇒ alert
-		matrix.NotifyMemberOffline(
-			rec.Member,
-			ctToString(rec.CheckType),
-			rec.CheckName,
-			rec.Domain,
-			rec.CheckURL,
-			rec.IsIPv6,
-			rec.Error,
-		)
+	if err == nil {
+		affected, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if shouldNotifyOffline(rec.Status, affected) {
+			// New outage ⇒ alert
+			matrix.NotifyMemberOffline(
+				rec.Member,
+				ctToString(rec.CheckType),
+				rec.CheckName,
+				rec.Domain,
+				rec.CheckURL,
+				rec.IsIPv6,
+				rec.Error,
+			)
+		}
 	}
 
 	return err
