@@ -137,7 +137,8 @@ func Subscribe(subject string, cb func(*nats.Msg)) (*nats.Subscription, error) {
 		return nil, nats.ErrConnectionClosed
 	}
 	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
-		cb(cloneNatsMsg(m))
+		msgCopy := cloneNatsMsg(m)
+		go cb(msgCopy)
 	})
 	if err != nil {
 		return nil, err
