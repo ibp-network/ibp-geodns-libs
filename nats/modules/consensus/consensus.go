@@ -12,7 +12,10 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
-const minConsensusVotes = 1
+const (
+	minConsensusVotes         = 1
+	proposalRepublishInterval = 10 * time.Second
+)
 
 type Dependencies struct {
 	State               *core.NodeState
@@ -34,6 +37,14 @@ func ProposeCheckStatus(
 ) {
 	propose(deps, checkType, checkName, memberName, domainName, endpoint,
 		status, errorText, dataMap, isIPv6)
+}
+
+func publishProposal(deps Dependencies, proposal core.Proposal) error {
+	dataBytes, err := json.Marshal(proposal)
+	if err != nil {
+		return err
+	}
+	return deps.Publish(deps.State.SubjectPropose, dataBytes)
 }
 
 func findMatchingProposalLocked(state *core.NodeState, prop core.Proposal) *core.ProposalTracking {
@@ -124,6 +135,7 @@ func propose(
 	isIPv6 bool,
 ) {
 	state := deps.State
+	now := time.Now().UTC()
 	pid := core.ProposalID(uuid.New().String())
 
 	prop := core.Proposal{
@@ -138,17 +150,13 @@ func propose(
 		ErrorText:      errorText,
 		Data:           data,
 		IsIPv6:         isIPv6,
-		Timestamp:      time.Now().UTC(),
+		Timestamp:      now,
 	}
 
-	log.Log(log.Debug,
-		"[CONSENSUS] → PROPOSAL created id=%s type=%s member=%s status=%v v6=%v",
-		prop.ID, prop.CheckType, prop.MemberName, prop.ProposedStatus, prop.IsIPv6)
-	log.Log(log.Debug, "[CONSENSUS]     details=%+v", prop)
-
 	pt := &core.ProposalTracking{
-		Proposal: prop,
-		Votes:    make(map[string]bool),
+		Proposal:        prop,
+		Votes:           make(map[string]bool),
+		LastBroadcastAt: now,
 	}
 
 	state.Mu.Lock()
@@ -157,7 +165,31 @@ func propose(
 	}
 	if existing := findMatchingProposalLocked(state, prop); existing != nil {
 		existingProp := existing.Proposal
+		lastBroadcastAt := existing.LastBroadcastAt
+		if lastBroadcastAt.IsZero() {
+			lastBroadcastAt = existingProp.Timestamp
+		}
+		existingAge := now.Sub(existingProp.Timestamp)
+		shouldRepublish := existingProp.SenderNodeID == state.NodeID &&
+			now.Sub(lastBroadcastAt) >= proposalRepublishInterval
+		if shouldRepublish {
+			existing.LastBroadcastAt = now
+		}
 		state.Mu.Unlock()
+		if shouldRepublish {
+			log.Log(log.Debug,
+				"[CONSENSUS] ↻ PROPOSAL republish id=%s type=%s member=%s status=%v v6=%v age=%s",
+				existingProp.ID, existingProp.CheckType, existingProp.MemberName, existingProp.ProposedStatus, existingProp.IsIPv6, existingAge)
+			log.Log(log.Debug, "[CONSENSUS]     details=%+v", existingProp)
+			if err := publishProposal(deps, existingProp); err != nil {
+				log.Log(log.Error, "[NATS] failed to republish proposal %s: %v", existingProp.ID, err)
+			}
+		} else {
+			log.Log(log.Debug,
+				"[CONSENSUS]    suppress duplicate proposal new_id=%s existing_id=%s sender=%s age=%s type=%s member=%s status=%v v6=%v",
+				pid, existingProp.ID, existingProp.SenderNodeID, existingAge,
+				existingProp.CheckType, existingProp.MemberName, existingProp.ProposedStatus, existingProp.IsIPv6)
+		}
 		go voteOnProposal(deps, existingProp)
 		return
 	}
@@ -165,9 +197,13 @@ func propose(
 	pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
 	state.Mu.Unlock()
 
-	dataBytes, err := json.Marshal(prop)
-	if err != nil {
-		log.Log(log.Error, "[NATS] failed to marshal proposal %s: %v", pid, err)
+	log.Log(log.Debug,
+		"[CONSENSUS] → PROPOSAL published id=%s type=%s member=%s status=%v v6=%v",
+		prop.ID, prop.CheckType, prop.MemberName, prop.ProposedStatus, prop.IsIPv6)
+	log.Log(log.Debug, "[CONSENSUS]     details=%+v", prop)
+
+	if err := publishProposal(deps, prop); err != nil {
+		log.Log(log.Error, "[NATS] failed to publish proposal %s: %v", pid, err)
 		state.Mu.Lock()
 		if existing, ok := state.Proposals[pid]; ok {
 			if existing.Timer != nil {
@@ -177,10 +213,6 @@ func propose(
 		}
 		state.Mu.Unlock()
 		return
-	}
-
-	if deps.Publish(state.SubjectPropose, dataBytes) != nil {
-		log.Log(log.Error, "[NATS] failed to publish proposal %s", pid)
 	}
 
 	go voteOnProposal(deps, prop)
@@ -204,8 +236,9 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 		return
 	}
 	state.Proposals[prop.ID] = &core.ProposalTracking{
-		Proposal: prop,
-		Votes:    make(map[string]bool),
+		Proposal:        prop,
+		Votes:           make(map[string]bool),
+		LastBroadcastAt: time.Now().UTC(),
 	}
 	appliedPending := applyPendingVotesLocked(deps, state.Proposals[prop.ID])
 	state.Proposals[prop.ID].Timer = time.AfterFunc(state.ProposalTimeout,

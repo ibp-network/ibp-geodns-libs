@@ -52,11 +52,12 @@ type Proposal struct {
 }
 
 type ProposalTracking struct {
-	Proposal  Proposal
-	Votes     map[string]bool
-	Finalized bool
-	Passed    bool
-	Timer     *time.Timer
+	Proposal        Proposal
+	Votes           map[string]bool
+	Finalized       bool
+	Passed          bool
+	Timer           *time.Timer
+	LastBroadcastAt time.Time
 }
 
 type Vote struct {

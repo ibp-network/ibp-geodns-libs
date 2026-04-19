@@ -228,6 +228,72 @@ func TestHandleProposalVotesOnMatchingProposalWithDifferentID(t *testing.T) {
 	}
 }
 
+func TestProposeCheckStatusRepublishesUnresolvedLocalProposalAfterInterval(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	publishedProposals := 0
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectPropose {
+			publishedProposals++
+		}
+		return nil
+	}
+
+	ProposeCheckStatus(
+		deps,
+		"endpoint",
+		"noop",
+		"provider1",
+		"rpc.example.com",
+		"wss://rpc.example.com/ws",
+		true,
+		"",
+		nil,
+		false,
+	)
+
+	deps.State.Mu.Lock()
+	if got := len(deps.State.Proposals); got != 1 {
+		deps.State.Mu.Unlock()
+		t.Fatalf("expected one tracked proposal, got %d", got)
+	}
+	var pt *core.ProposalTracking
+	for _, candidate := range deps.State.Proposals {
+		pt = candidate
+		break
+	}
+	if pt == nil {
+		deps.State.Mu.Unlock()
+		t.Fatal("expected tracked proposal to exist")
+	}
+	pt.LastBroadcastAt = time.Now().Add(-proposalRepublishInterval - time.Second)
+	deps.State.Mu.Unlock()
+
+	ProposeCheckStatus(
+		deps,
+		"endpoint",
+		"noop",
+		"provider1",
+		"rpc.example.com",
+		"wss://rpc.example.com/ws",
+		true,
+		"",
+		nil,
+		false,
+	)
+
+	if publishedProposals != 2 {
+		t.Fatalf("expected unresolved local proposal to be republished, got %d publishes", publishedProposals)
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if got := len(deps.State.Proposals); got != 1 {
+		t.Fatalf("expected exactly one tracked proposal after republish, got %d", got)
+	}
+}
+
 func TestProposeCheckStatusVotesOnExistingMatchingProposal(t *testing.T) {
 	deps := newTestDependencies()
 	defer stopProposalTimers(deps.State)
