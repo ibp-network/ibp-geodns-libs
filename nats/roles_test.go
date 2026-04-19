@@ -241,3 +241,83 @@ func TestCollatorCachesProposalBurst(t *testing.T) {
 		t.Fatalf("expected collator to cache %d proposals, cached %d", proposalCount, len(seen))
 	}
 }
+
+func TestMonitorTracksProposalBurst(t *testing.T) {
+	srv := runRoleTestServer(t)
+
+	libConn, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect library client: %v", err)
+	}
+	connectionMu.Lock()
+	nc = libConn
+	NC = libConn
+	connectionMu.Unlock()
+	t.Cleanup(func() {
+		Disconnect()
+		State = NodeState{}
+		atomic.StoreInt64(&lastJoin, 0)
+	})
+
+	publisher, err := natsio.Connect(srv.ClientURL())
+	if err != nil {
+		t.Fatalf("connect publisher client: %v", err)
+	}
+	t.Cleanup(func() {
+		publisher.Close()
+	})
+
+	State = NodeState{}
+	atomic.StoreInt64(&lastJoin, 0)
+	State.NodeID = "STAKEPLUS"
+	State.ThisNode = NodeInfo{
+		NodeID:        "STAKEPLUS",
+		ListenAddress: "127.0.0.1",
+		ListenPort:    "6101",
+		NodeRole:      "IBPMonitor",
+	}
+
+	if err := EnableMonitorRole(); err != nil {
+		t.Fatalf("enable monitor role: %v", err)
+	}
+
+	const proposalCount = 50
+	for i := 0; i < proposalCount; i++ {
+		payload, err := json.Marshal(Proposal{
+			ID:             ProposalID("monitor-burst-" + time.Now().UTC().Format("150405.000000000") + "-" + string(rune('A'+(i%26))) + "-" + string(rune('a'+((i/26)%26)))),
+			SenderNodeID:   "ROTKO",
+			CheckType:      "unknown",
+			CheckName:      "noop",
+			MemberName:     "member",
+			DomainName:     "domain.example",
+			Endpoint:       "wss://domain.example",
+			ProposedStatus: true,
+			Timestamp:      time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("marshal monitor proposal %d: %v", i, err)
+		}
+		if err := publisher.Publish("consensus.propose", payload); err != nil {
+			t.Fatalf("publish monitor proposal %d: %v", i, err)
+		}
+	}
+	if err := publisher.Flush(); err != nil {
+		t.Fatalf("flush monitor proposals: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		State.Mu.RLock()
+		got := len(State.Proposals)
+		State.Mu.RUnlock()
+		if got >= proposalCount {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	State.Mu.RLock()
+	got := len(State.Proposals)
+	State.Mu.RUnlock()
+	t.Fatalf("expected monitor to track %d proposals, tracked %d", proposalCount, got)
+}

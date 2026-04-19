@@ -14,7 +14,7 @@ import (
 
 var (
 	nc           *nats.Conn
-	connectionMu sync.Mutex
+	connectionMu sync.RWMutex
 )
 
 func cloneNatsMsg(m *nats.Msg) *nats.Msg {
@@ -40,9 +40,16 @@ func cloneNatsMsg(m *nats.Msg) *nats.Msg {
 }
 
 func GetConnection() *nats.Conn {
-	connectionMu.Lock()
-	defer connectionMu.Unlock()
+	connectionMu.RLock()
+	defer connectionMu.RUnlock()
 	return nc
+}
+
+func currentConnection() *nats.Conn {
+	connectionMu.RLock()
+	conn := nc
+	connectionMu.RUnlock()
+	return conn
 }
 
 func Connect() error {
@@ -107,36 +114,27 @@ func Disconnect() {
 }
 
 func Publish(subject string, data []byte) error {
-	connectionMu.Lock()
-	defer connectionMu.Unlock()
-	if nc == nil || nc.IsClosed() {
+	conn := currentConnection()
+	if conn == nil || conn.IsClosed() {
 		return nats.ErrConnectionClosed
 	}
-	if err := nc.Publish(subject, data); err != nil {
-		return err
-	}
-	return nc.Flush()
+	return conn.Publish(subject, data)
 }
 
 func PublishMsgWithReply(subject, reply string, data []byte) error {
-	connectionMu.Lock()
-	defer connectionMu.Unlock()
-	if nc == nil || nc.IsClosed() {
+	conn := currentConnection()
+	if conn == nil || conn.IsClosed() {
 		return nats.ErrConnectionClosed
 	}
-	if err := nc.PublishMsg(&nats.Msg{Subject: subject, Reply: reply, Data: data}); err != nil {
-		return err
-	}
-	return nc.Flush()
+	return conn.PublishMsg(&nats.Msg{Subject: subject, Reply: reply, Data: data})
 }
 
 func Subscribe(subject string, cb func(*nats.Msg)) (*nats.Subscription, error) {
-	connectionMu.Lock()
-	defer connectionMu.Unlock()
-	if nc == nil || nc.IsClosed() {
+	conn := currentConnection()
+	if conn == nil || conn.IsClosed() {
 		return nil, nats.ErrConnectionClosed
 	}
-	sub, err := nc.Subscribe(subject, func(m *nats.Msg) {
+	sub, err := conn.Subscribe(subject, func(m *nats.Msg) {
 		go cb(m)
 	})
 	if err != nil {
@@ -147,10 +145,9 @@ func Subscribe(subject string, cb func(*nats.Msg)) (*nats.Subscription, error) {
 }
 
 func Request(subject string, data []byte, timeout time.Duration) (*nats.Msg, error) {
-	connectionMu.Lock()
-	defer connectionMu.Unlock()
-	if nc == nil || nc.IsClosed() {
+	conn := currentConnection()
+	if conn == nil || conn.IsClosed() {
 		return nil, nats.ErrConnectionClosed
 	}
-	return nc.Request(subject, data, timeout)
+	return conn.Request(subject, data, timeout)
 }

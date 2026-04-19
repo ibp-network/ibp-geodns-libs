@@ -9,6 +9,7 @@ import (
 	"time"
 
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
+	"github.com/ibp-network/ibp-geodns-libs/nats/subjects"
 
 	"github.com/nats-io/nats.go"
 )
@@ -26,6 +27,11 @@ var (
 )
 
 var lastJoin int64 // unix‑nano timestamp of our last JOIN
+
+type subjectHandler struct {
+	subject string
+	handler func(*nats.Msg)
+}
 
 func EnableMonitorRole() error  { return enableRoleInternal("IBPMonitor") }
 func EnableDnsRole() error      { return enableRoleInternal("IBPDns") }
@@ -62,7 +68,7 @@ func enableRoleInternal(role string) error {
 	// Be more resilient to transient NATS unavailability.
 	var err error
 	for i := 0; i < 5; i++ {
-		if _, err = Subscribe(">", handleAllMessages); err == nil {
+		if err = subscribeRoleSubjects(role); err == nil {
 			break
 		}
 		log.Log(log.Warn, "[NATS] subscribe failed (attempt %d/5): %v", i+1, err)
@@ -87,6 +93,48 @@ func enableRoleInternal(role string) error {
 	}()
 
 	return nil
+}
+
+func subscribeRoleSubjects(role string) error {
+	for _, sub := range roleSubscriptions(role) {
+		if sub.subject == "" || sub.handler == nil {
+			continue
+		}
+		if _, err := Subscribe(sub.subject, sub.handler); err != nil {
+			return fmt.Errorf("subscribe %s for %s: %w", sub.subject, role, err)
+		}
+	}
+	return nil
+}
+
+func roleSubscriptions(role string) []subjectHandler {
+	base := []subjectHandler{
+		{subject: State.SubjectCluster, handler: handleClusterMessage},
+	}
+
+	switch role {
+	case "IBPMonitor":
+		return append(base,
+			subjectHandler{subject: State.SubjectPropose, handler: handleProposal},
+			subjectHandler{subject: State.SubjectVote, handler: handleVote},
+			subjectHandler{subject: State.SubjectFinalize, handler: handleFinalize},
+			subjectHandler{subject: subjects.MonitorStatsRequest, handler: handleMonitorStatsRequest},
+		)
+	case "IBPCollator":
+		return append(base,
+			subjectHandler{subject: State.SubjectPropose, handler: cacheCollatorProposal},
+			subjectHandler{subject: State.SubjectVote, handler: cacheCollatorVote},
+			subjectHandler{subject: State.SubjectFinalize, handler: handleFinalize},
+			subjectHandler{subject: subjects.MonitorStatsData, handler: handleMonitorStatsData},
+			subjectHandler{subject: subjects.DnsUsageData, handler: handleUsageData},
+		)
+	case "IBPDns":
+		return append(base,
+			subjectHandler{subject: subjects.DnsUsageRequest, handler: handleDnsUsageRequest},
+		)
+	default:
+		return base
+	}
 }
 
 func startHeartbeat() {
