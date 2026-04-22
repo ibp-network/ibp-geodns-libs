@@ -72,7 +72,11 @@ func HandleRequest(deps Dependencies, reply string, data []byte) {
 		NodeID:       deps.State.NodeID,
 		UsageRecords: records,
 	}
-	payload, _ := json.Marshal(resp)
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		log.Log(log.Error, "[NATS] handleDnsUsageRequest: marshal error: %v", err)
+		return
+	}
 
 	if reply != "" {
 		log.Log(log.Debug,

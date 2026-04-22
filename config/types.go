@@ -48,7 +48,7 @@ type DiscordConfig struct {
 type SystemConfig struct {
 	WorkDir            string        `json:"WorkDir"`
 	LogLevel           string        `json:"LogLevel"`
-	ConfigReloadTime   time.Duration `json:"ConfigReloadTime"`
+	ConfigReloadTime   int           `json:"ConfigReloadTime"`
 	CacheSaveTime      time.Duration `json:"CacheSaveTime"`
 	MinimumOfflineTime int           `json:"MinimumOfflineTime"`
 	ConfigUrls         ConfigUrls    `json:"ConfigUrls"`

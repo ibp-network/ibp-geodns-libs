@@ -1,6 +1,7 @@
 package config
 
 import (
+	"os"
 	"sync"
 	"testing"
 )
@@ -77,6 +78,16 @@ func withTestConfig(t *testing.T, data Config) {
 	cfg = &ConfigInit{data: data}
 	t.Cleanup(func() {
 		cfg = prev
+	})
+}
+
+func withTestReloadHooks(t *testing.T) {
+	t.Helper()
+
+	prev := reloadHooks
+	reloadHooks = nil
+	t.Cleanup(func() {
+		reloadHooks = prev
 	})
 }
 
@@ -172,5 +183,48 @@ func TestListMembersReturnsDeepCopy(t *testing.T) {
 
 	if cfg.data.Members["provider1"].ServiceAssignments["rpc"][0] != "rpc.example.com" {
 		t.Fatalf("expected original member assignments to remain unchanged")
+	}
+}
+
+func TestRegisterReloadHookRunsOnLoadConfig(t *testing.T) {
+	withTestConfig(t, seedTestConfig())
+	withTestReloadHooks(t)
+
+	calls := 0
+	RegisterReloadHook("test-hook", func() {
+		calls++
+	})
+
+	configPath := t.TempDir() + "/system.json"
+	if err := os.WriteFile(configPath, []byte(`{"System":{"LogLevel":"Info","ConfigReloadTime":300}}`), 0600); err != nil {
+		t.Fatalf("write system config: %v", err)
+	}
+
+	loadConfig(configPath, false)
+
+	if calls != 1 {
+		t.Fatalf("expected reload hook to run once, got %d", calls)
+	}
+}
+
+func TestUnregisterReloadHookPreventsFurtherCalls(t *testing.T) {
+	withTestConfig(t, seedTestConfig())
+	withTestReloadHooks(t)
+
+	calls := 0
+	RegisterReloadHook("test-hook", func() {
+		calls++
+	})
+	UnregisterReloadHook("test-hook")
+
+	configPath := t.TempDir() + "/system.json"
+	if err := os.WriteFile(configPath, []byte(`{"System":{"LogLevel":"Info","ConfigReloadTime":300}}`), 0600); err != nil {
+		t.Fatalf("write system config: %v", err)
+	}
+
+	loadConfig(configPath, false)
+
+	if calls != 0 {
+		t.Fatalf("expected unregistered hook to remain idle, got %d calls", calls)
 	}
 }

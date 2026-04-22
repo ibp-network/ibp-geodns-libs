@@ -15,6 +15,7 @@ import (
 const (
 	minConsensusVotes         = 2
 	proposalRepublishInterval = 10 * time.Second
+	maxForceFinalizeRetries   = 3
 )
 
 type Dependencies struct {
@@ -75,6 +76,9 @@ func applyPendingVotesLocked(deps Dependencies, pt *core.ProposalTracking) int {
 		return 0
 	}
 	delete(state.PendingVotes, pt.Proposal.ID)
+	if state.PendingVoteTouched != nil {
+		delete(state.PendingVoteTouched, pt.Proposal.ID)
+	}
 
 	applied := 0
 	for nodeID, vote := range pending {
@@ -268,7 +272,6 @@ func HandleProposal(deps Dependencies, m *nats.Msg) {
 
 func voteOnProposal(deps Dependencies, prop core.Proposal) {
 	state := deps.State
-	time.Sleep(5 * time.Millisecond)
 
 	found, localStatus := checkLocalStatus(
 		prop.CheckType, prop.CheckName, prop.MemberName,
@@ -295,9 +298,11 @@ func voteOnProposal(deps Dependencies, prop core.Proposal) {
 	state.Mu.Lock()
 	appliedLocally := recordLocalVoteLocked(deps, v)
 	state.Mu.Unlock()
-	if appliedLocally {
-		log.Log(log.Debug, "[CONSENSUS]    applied local vote immediately for id=%s node=%s", v.ProposalID, v.NodeID)
+	if !appliedLocally {
+		log.Log(log.Debug, "[CONSENSUS]    skip publish for id=%s because proposal is missing or finalized locally", v.ProposalID)
+		return
 	}
+	log.Log(log.Debug, "[CONSENSUS]    applied local vote immediately for id=%s node=%s", v.ProposalID, v.NodeID)
 
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -329,10 +334,14 @@ func HandleVote(deps Dependencies, m *nats.Msg) {
 		if state.PendingVotes == nil {
 			state.PendingVotes = make(map[core.ProposalID]map[string]core.Vote)
 		}
+		if state.PendingVoteTouched == nil {
+			state.PendingVoteTouched = make(map[core.ProposalID]time.Time)
+		}
 		if _, exists := state.PendingVotes[v.ProposalID]; !exists {
 			state.PendingVotes[v.ProposalID] = make(map[string]core.Vote)
 		}
 		state.PendingVotes[v.ProposalID][v.NodeID] = v
+		state.PendingVoteTouched[v.ProposalID] = time.Now().UTC()
 		state.Mu.Unlock()
 		log.Log(log.Debug, "[CONSENSUS]    buffered out-of-order vote id=%s from=%s", v.ProposalID, v.NodeID)
 		return
@@ -402,13 +411,41 @@ func forceFinalize(deps Dependencies, pid core.ProposalID) {
 			finalize(deps, pt)
 			return
 		}
-		// Otherwise, keep retrying.
+		pt.ForceFinalizeAttempts++
+		if pt.ForceFinalizeAttempts >= maxForceFinalizeRetries {
+			log.Log(log.Warn, "[CONSENSUS] giving up on id=%s after %d finalize attempt(s)", pid, pt.ForceFinalizeAttempts)
+			pt.Finalized = true
+			pt.Passed = false
+			state.Mu.Unlock()
+			finalize(deps, pt)
+			return
+		}
+
+		// Otherwise, keep retrying until the bounded attempt limit is reached.
 		pt.Timer = time.AfterFunc(state.ProposalTimeout, func() { forceFinalize(deps, pid) })
 	}
 	state.Mu.Unlock()
 }
 
+func cleanupFinalizedProposalLocked(state *core.NodeState, proposalID core.ProposalID) {
+	if pt, ok := state.Proposals[proposalID]; ok {
+		if pt.Timer != nil {
+			pt.Timer.Stop()
+			pt.Timer = nil
+		}
+		pt.Finalized = true
+		delete(state.Proposals, proposalID)
+	}
+	if state.PendingVotes != nil {
+		delete(state.PendingVotes, proposalID)
+	}
+	if state.PendingVoteTouched != nil {
+		delete(state.PendingVoteTouched, proposalID)
+	}
+}
+
 func HandleFinalize(deps Dependencies, m *nats.Msg) {
+	state := deps.State
 	var fm core.FinalizeMessage
 	if err := json.Unmarshal(m.Data, &fm); err != nil {
 		log.Log(log.Error, "[NATS] handleFinalize: unmarshal error: %v", err)
@@ -416,7 +453,15 @@ func HandleFinalize(deps Dependencies, m *nats.Msg) {
 	}
 	log.Log(log.Debug,
 		"[CONSENSUS] ← FINALIZE id=%s PASS=%v", fm.Proposal.ID, fm.Passed)
-	markConsensusSenderHeard(deps, fm.Proposal.SenderNodeID)
+	senderNodeID := fm.SenderNodeID
+	if senderNodeID == "" {
+		senderNodeID = fm.Proposal.SenderNodeID
+	}
+	markConsensusSenderHeard(deps, senderNodeID)
+
+	state.Mu.Lock()
+	cleanupFinalizedProposalLocked(state, fm.Proposal.ID)
+	state.Mu.Unlock()
 
 	if deps.OnFinalize != nil {
 		deps.OnFinalize(fm)
@@ -439,9 +484,10 @@ func checkLocalStatus(checkType, checkName, memberName, domainName, endpoint str
 func finalize(deps Dependencies, pt *core.ProposalTracking) {
 	state := deps.State
 	msg := core.FinalizeMessage{
-		Proposal:  pt.Proposal,
-		Passed:    pt.Passed,
-		DecidedAt: time.Now().UTC(),
+		Proposal:     pt.Proposal,
+		SenderNodeID: state.NodeID,
+		Passed:       pt.Passed,
+		DecidedAt:    time.Now().UTC(),
 	}
 
 	if deps.OnFinalize != nil {
@@ -457,6 +503,6 @@ func finalize(deps Dependencies, pt *core.ProposalTracking) {
 	}
 
 	state.Mu.Lock()
-	delete(state.Proposals, pt.Proposal.ID)
+	cleanupFinalizedProposalLocked(state, pt.Proposal.ID)
 	state.Mu.Unlock()
 }

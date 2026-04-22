@@ -24,18 +24,21 @@ type Dependencies struct {
 }
 
 func HandleRequest(deps Dependencies, reply string, data []byte) {
+	if reply == "" {
+		log.Log(log.Warn, "[NATS] handleMonitorStatsRequest: missing reply inbox; refusing to broadcast downtime data")
+		return
+	}
+
 	var req core.DowntimeRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		log.Log(log.Error, "[NATS] handleMonitorStatsRequest: unmarshal error: %v", err)
-		if reply != "" {
-			errResp := core.DowntimeResponse{
-				NodeID: deps.State.NodeID,
-				Events: []core.DowntimeEvent{},
-				Error:  fmt.Sprintf("unmarshal error: %v", err),
-			}
-			if payload, err := json.Marshal(errResp); err == nil {
-				_ = deps.PublishMsgWithReply(reply, "", payload)
-			}
+		errResp := core.DowntimeResponse{
+			NodeID: deps.State.NodeID,
+			Events: []core.DowntimeEvent{},
+			Error:  fmt.Sprintf("unmarshal error: %v", err),
+		}
+		if payload, err := json.Marshal(errResp); err == nil {
+			_ = deps.PublishMsgWithReply(reply, "", payload)
 		}
 		return
 	}
@@ -45,15 +48,13 @@ func HandleRequest(deps Dependencies, reply string, data []byte) {
 
 	if req.EndTime.Before(req.StartTime) {
 		log.Log(log.Error, "[NATS] handleMonitorStatsRequest: EndTime before StartTime")
-		if reply != "" {
-			errResp := core.DowntimeResponse{
-				NodeID: deps.State.NodeID,
-				Events: []core.DowntimeEvent{},
-				Error:  "EndTime must be after StartTime",
-			}
-			if payload, err := json.Marshal(errResp); err == nil {
-				_ = deps.PublishMsgWithReply(reply, "", payload)
-			}
+		errResp := core.DowntimeResponse{
+			NodeID: deps.State.NodeID,
+			Events: []core.DowntimeEvent{},
+			Error:  "EndTime must be after StartTime",
+		}
+		if payload, err := json.Marshal(errResp); err == nil {
+			_ = deps.PublishMsgWithReply(reply, "", payload)
 		}
 		return
 	}
@@ -68,19 +69,16 @@ func HandleRequest(deps Dependencies, reply string, data []byte) {
 		NodeID: deps.State.NodeID,
 		Events: events,
 	}
-	payload, _ := json.Marshal(resp)
-
-	if reply != "" {
-		log.Log(log.Debug,
-			"[NATS] handleMonitorStatsRequest: replying to %s with %d events",
-			reply, len(events))
-		_ = deps.PublishMsgWithReply(reply, "", payload)
-	} else if deps.StatsDataSubject != "" {
-		log.Log(log.Debug,
-			"[NATS] handleMonitorStatsRequest: publishing downtimeData with %d events",
-			len(events))
-		_ = deps.Publish(deps.StatsDataSubject, payload)
+	payload, err := json.Marshal(resp)
+	if err != nil {
+		log.Log(log.Error, "[NATS] handleMonitorStatsRequest: marshal error: %v", err)
+		return
 	}
+
+	log.Log(log.Debug,
+		"[NATS] handleMonitorStatsRequest: replying to %s with %d events",
+		reply, len(events))
+	_ = deps.PublishMsgWithReply(reply, "", payload)
 }
 
 func HandleData(deps Dependencies, data []byte) {

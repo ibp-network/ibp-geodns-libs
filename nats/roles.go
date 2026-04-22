@@ -19,6 +19,7 @@ const (
 	broadcastJoinRetryCount = 3
 	broadcastJoinDelay      = 500 * time.Millisecond
 	joinThrottleWindow      = 5 * time.Second
+	pendingVoteGCWindow     = 2 * time.Minute
 )
 
 var (
@@ -38,15 +39,16 @@ func EnableDnsRole() error      { return enableRoleInternal("IBPDns") }
 func EnableCollatorRole() error { return enableRoleInternal("IBPCollator") }
 
 func enableRoleInternal(role string) error {
+	if strings.TrimSpace(State.NodeID) == "" {
+		return fmt.Errorf("NodeID is empty; cannot enable role %s", role)
+	}
+
+	State.Mu.Lock()
 	State.SubjectPropose = "consensus.propose"
 	State.SubjectVote = "consensus.vote"
 	State.SubjectFinalize = "consensus.finalize"
 	State.SubjectCluster = "consensus.cluster"
 	State.ProposalTimeout = 30 * time.Second
-
-	if strings.TrimSpace(State.NodeID) == "" {
-		return fmt.Errorf("NodeID is empty; cannot enable role %s", role)
-	}
 
 	if State.Proposals == nil {
 		State.Proposals = make(map[ProposalID]*ProposalTracking)
@@ -54,14 +56,15 @@ func enableRoleInternal(role string) error {
 	if State.PendingVotes == nil {
 		State.PendingVotes = make(map[ProposalID]map[string]Vote)
 	}
+	if State.PendingVoteTouched == nil {
+		State.PendingVoteTouched = make(map[ProposalID]time.Time)
+	}
 	if State.ClusterNodes == nil {
 		State.ClusterNodes = make(map[string]NodeInfo)
 	}
 
 	State.ThisNode.NodeRole = role
 	State.ThisNode.LastHeard = time.Now().UTC()
-
-	State.Mu.Lock()
 	State.ClusterNodes[State.NodeID] = State.ThisNode
 	State.Mu.Unlock()
 
@@ -96,13 +99,19 @@ func enableRoleInternal(role string) error {
 }
 
 func subscribeRoleSubjects(role string) error {
+	subs := make([]*nats.Subscription, 0)
 	for _, sub := range roleSubscriptions(role) {
 		if sub.subject == "" || sub.handler == nil {
 			continue
 		}
-		if _, err := Subscribe(sub.subject, sub.handler); err != nil {
+		createdSub, err := Subscribe(sub.subject, sub.handler)
+		if err != nil {
+			for _, existingSub := range subs {
+				_ = existingSub.Unsubscribe()
+			}
 			return fmt.Errorf("subscribe %s for %s: %w", sub.subject, role, err)
 		}
+		subs = append(subs, createdSub)
 	}
 	return nil
 }
@@ -125,7 +134,6 @@ func roleSubscriptions(role string) []subjectHandler {
 			subjectHandler{subject: State.SubjectPropose, handler: cacheCollatorProposal},
 			subjectHandler{subject: State.SubjectVote, handler: cacheCollatorVote},
 			subjectHandler{subject: State.SubjectFinalize, handler: handleFinalize},
-			subjectHandler{subject: subjects.MonitorStatsData, handler: handleMonitorStatsData},
 			subjectHandler{subject: subjects.DnsUsageData, handler: handleUsageData},
 		)
 	case "IBPDns":
@@ -173,7 +181,11 @@ func broadcastClusterJoin(force bool) {
 		Type:   "join",
 		Sender: sender,
 	}
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		log.Log(log.Error, "[NATS] Failed to marshal JOIN message: %v", err)
+		return
+	}
 	if err := Publish(State.SubjectCluster, data); err != nil {
 		log.Log(log.Error, "[NATS] Failed to publish JOIN: %v", err)
 	}
@@ -332,6 +344,10 @@ func cleanOldProposals() {
 	State.Mu.Lock()
 	defer State.Mu.Unlock()
 
+	if State.PendingVoteTouched == nil {
+		State.PendingVoteTouched = make(map[ProposalID]time.Time)
+	}
+
 	now := time.Now().UTC()
 	for id, pt := range State.Proposals {
 		if now.Sub(pt.Proposal.Timestamp) > 10*time.Minute {
@@ -339,6 +355,37 @@ func cleanOldProposals() {
 				pt.Timer.Stop()
 			}
 			delete(State.Proposals, id)
+			delete(State.PendingVotes, id)
+			delete(State.PendingVoteTouched, id)
+		}
+	}
+
+	for id, votes := range State.PendingVotes {
+		if _, ok := State.Proposals[id]; ok {
+			continue
+		}
+		if len(votes) == 0 {
+			delete(State.PendingVotes, id)
+			delete(State.PendingVoteTouched, id)
+			continue
+		}
+
+		lastTouched := State.PendingVoteTouched[id]
+		if lastTouched.IsZero() {
+			for _, vote := range votes {
+				if vote.Timestamp.After(lastTouched) {
+					lastTouched = vote.Timestamp
+				}
+			}
+			if lastTouched.IsZero() {
+				lastTouched = now
+			}
+			State.PendingVoteTouched[id] = lastTouched
+		}
+
+		if now.Sub(lastTouched) > pendingVoteGCWindow {
+			delete(State.PendingVotes, id)
+			delete(State.PendingVoteTouched, id)
 		}
 	}
 }
@@ -354,6 +401,16 @@ func cleanStaleNodes() {
 		}
 		if !node.LastHeard.IsZero() && now.Sub(node.LastHeard) > 15*time.Minute {
 			delete(State.ClusterNodes, id)
+			for _, pt := range State.Proposals {
+				delete(pt.Votes, id)
+			}
+			for proposalID, votes := range State.PendingVotes {
+				delete(votes, id)
+				if len(votes) == 0 {
+					delete(State.PendingVotes, proposalID)
+					delete(State.PendingVoteTouched, proposalID)
+				}
+			}
 		}
 	}
 }

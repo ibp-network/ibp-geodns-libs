@@ -6,6 +6,7 @@ import (
 	"time"
 
 	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	"github.com/ibp-network/ibp-geodns-libs/internal/requestschema"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -43,6 +44,10 @@ func Init() {
 	DB.SetMaxOpenConns(100)
 	DB.SetMaxIdleConns(10)
 	DB.SetConnMaxLifetime(time.Hour)
+
+	if err := requestschema.EnsureUniqueIndex(DB); err != nil {
+		fmt.Printf("[mysql.Init] requests schema check failed: %v\n", err)
+	}
 
 	fmt.Println("[mysql.Init] Connected successfully to MySQL.")
 }

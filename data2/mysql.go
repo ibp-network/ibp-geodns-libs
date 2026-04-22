@@ -6,6 +6,7 @@ import (
 	"time"
 
 	cfg "github.com/ibp-network/ibp-geodns-libs/config"
+	"github.com/ibp-network/ibp-geodns-libs/internal/requestschema"
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -38,6 +39,9 @@ func Init() {
 	// retry loop (30 s max)
 	for i := 0; i < 30; i++ {
 		if err = DB.Ping(); err == nil {
+			if schemaErr := requestschema.EnsureUniqueIndex(DB); schemaErr != nil {
+				log.Log(log.Warn, "[data2] requests schema check failed: %v", schemaErr)
+			}
 			log.Log(log.Info, "[data2] Connected to MySQL (%s)", c.Local.Mysql.Host)
 			return
 		}

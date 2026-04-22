@@ -1,7 +1,6 @@
 package data2
 
 import (
-	"database/sql"
 	"fmt"
 	"strings"
 
@@ -35,24 +34,21 @@ func UpsertUsage(r UsageRecord) error {
 	_, err := DB.Exec(
 		q,
 		r.Date.Format("2006-01-02"),
-		r.NodeID,
-		nullOrEmpty(r.Domain),
-		nullOrEmpty(r.MemberName),
-		nullOrEmpty(r.Asn),
-		nullOrEmpty(r.NetworkName),
-		nullOrEmpty(r.CountryCode),
-		nullOrEmpty(r.CountryName),
+		usageKeyValue(r.NodeID),
+		usageKeyValue(r.Domain),
+		usageKeyValue(r.MemberName),
+		usageKeyValue(r.Asn),
+		usageKeyValue(r.NetworkName),
+		usageKeyValue(r.CountryCode),
+		usageKeyValue(r.CountryName),
 		ipFlag,
 		r.Hits,
 	)
 	return err
 }
 
-func nullOrEmpty(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
+func usageKeyValue(s string) string {
+	return s
 }
 
 func StoreUsageRecords(recs []UsageRecord) error {

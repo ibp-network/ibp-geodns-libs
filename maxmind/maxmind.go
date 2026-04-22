@@ -244,12 +244,13 @@ func walkForMmdb(path string) (string, error) {
 
 func cleanupExtractedDirs(baseDir, editionID string) {
 	entries, _ := os.ReadDir(baseDir)
+	pattern := regexp.MustCompile("^" + regexp.QuoteMeta(editionID) + `_\d{8}$`)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		name := e.Name()
-		if strings.HasPrefix(name, editionID+"_") {
+		if pattern.MatchString(name) {
 			fullPath := filepath.Join(baseDir, name)
 			os.RemoveAll(fullPath)
 		}
@@ -280,6 +281,13 @@ func extractTarGz(tarGzPath, destDir string) error {
 		}
 
 		outPath := filepath.Join(destDir, header.Name)
+		cleanDestDir := filepath.Clean(destDir)
+		cleanOutPath := filepath.Clean(outPath)
+		destPrefix := cleanDestDir + string(os.PathSeparator)
+		if cleanOutPath != cleanDestDir && !strings.HasPrefix(cleanOutPath, destPrefix) {
+			return fmt.Errorf("tar entry escapes destination: %s", header.Name)
+		}
+		outPath = cleanOutPath
 
 		switch header.Typeflag {
 		case tar.TypeDir:

@@ -15,6 +15,7 @@ import (
 var (
 	nc           *nats.Conn
 	connectionMu sync.RWMutex
+	callbackSem  = make(chan struct{}, 256)
 )
 
 func cloneNatsMsg(m *nats.Msg) *nats.Msg {
@@ -146,7 +147,17 @@ func Subscribe(subject string, cb func(*nats.Msg)) (*nats.Subscription, error) {
 		return nil, nats.ErrConnectionClosed
 	}
 	sub, err := conn.Subscribe(subject, func(m *nats.Msg) {
-		go cb(m)
+		callbackSem <- struct{}{}
+		msgCopy := cloneNatsMsg(m)
+		go func() {
+			defer func() {
+				<-callbackSem
+				if r := recover(); r != nil {
+					log.Log(log.Error, "[NATS] callback panic for %s: %v", msgCopy.Subject, r)
+				}
+			}()
+			cb(msgCopy)
+		}()
 	})
 	if err != nil {
 		return nil, err

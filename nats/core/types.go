@@ -10,19 +10,20 @@ import (
 type UsageRequest = data2.UsageRequest
 
 type NodeState struct {
-	NodeID          string
-	ThisNode        NodeInfo
-	Mu              sync.RWMutex
-	Proposals       map[ProposalID]*ProposalTracking
-	PendingVotes    map[ProposalID]map[string]Vote
-	ClusterNodes    map[string]NodeInfo
-	SubjectPropose  string
-	SubjectVote     string
-	SubjectFinalize string
-	SubjectCluster  string
-	ProposalTimeout time.Duration
-	NatsUrl         string
-	JoinUrl         string
+	NodeID             string
+	ThisNode           NodeInfo
+	Mu                 sync.RWMutex
+	Proposals          map[ProposalID]*ProposalTracking
+	PendingVotes       map[ProposalID]map[string]Vote
+	PendingVoteTouched map[ProposalID]time.Time
+	ClusterNodes       map[string]NodeInfo
+	SubjectPropose     string
+	SubjectVote        string
+	SubjectFinalize    string
+	SubjectCluster     string
+	ProposalTimeout    time.Duration
+	NatsUrl            string
+	JoinUrl            string
 }
 
 type NodeInfo struct {
@@ -52,12 +53,13 @@ type Proposal struct {
 }
 
 type ProposalTracking struct {
-	Proposal        Proposal
-	Votes           map[string]bool
-	Finalized       bool
-	Passed          bool
-	Timer           *time.Timer
-	LastBroadcastAt time.Time
+	Proposal              Proposal
+	Votes                 map[string]bool
+	Finalized             bool
+	Passed                bool
+	Timer                 *time.Timer
+	LastBroadcastAt       time.Time
+	ForceFinalizeAttempts int
 }
 
 type Vote struct {
@@ -69,9 +71,10 @@ type Vote struct {
 }
 
 type FinalizeMessage struct {
-	Proposal  Proposal  `json:"Proposal"`
-	Passed    bool      `json:"Passed"`
-	DecidedAt time.Time `json:"DecidedAt"`
+	Proposal     Proposal  `json:"Proposal"`
+	SenderNodeID string    `json:"SenderNodeID,omitempty"`
+	Passed       bool      `json:"Passed"`
+	DecidedAt    time.Time `json:"DecidedAt"`
 }
 
 type UsageRecord struct {

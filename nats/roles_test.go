@@ -321,3 +321,84 @@ func TestMonitorTracksProposalBurst(t *testing.T) {
 	State.Mu.RUnlock()
 	t.Fatalf("expected monitor to track %d proposals, tracked %d", proposalCount, got)
 }
+
+func TestCleanOldProposalsRemovesOrphanPendingVotesAfterTTL(t *testing.T) {
+	State = NodeState{
+		PendingVotes: map[ProposalID]map[string]Vote{
+			"orphan": {
+				"monitor-b": {
+					ProposalID: "orphan",
+					NodeID:     "monitor-b",
+					Agree:      true,
+					Timestamp:  time.Now().Add(-pendingVoteGCWindow - time.Second),
+				},
+			},
+		},
+		PendingVoteTouched: map[ProposalID]time.Time{
+			"orphan": time.Now().Add(-pendingVoteGCWindow - time.Second),
+		},
+		Proposals: make(map[ProposalID]*ProposalTracking),
+	}
+
+	cleanOldProposals()
+
+	if _, ok := State.PendingVotes["orphan"]; ok {
+		t.Fatal("expected orphan pending vote bucket to be garbage collected")
+	}
+	if _, ok := State.PendingVoteTouched["orphan"]; ok {
+		t.Fatal("expected orphan pending vote timestamp to be cleared")
+	}
+}
+
+func TestCleanStaleNodesPurgesVotesForRemovedPeers(t *testing.T) {
+	staleTime := time.Now().UTC().Add(-16 * time.Minute)
+	State = NodeState{
+		NodeID: "self",
+		ClusterNodes: map[string]NodeInfo{
+			"self": {
+				NodeID:    "self",
+				NodeRole:  "IBPMonitor",
+				LastHeard: time.Now().UTC(),
+			},
+			"stale-node": {
+				NodeID:    "stale-node",
+				NodeRole:  "IBPMonitor",
+				LastHeard: staleTime,
+			},
+		},
+		Proposals: map[ProposalID]*ProposalTracking{
+			"proposal-1": {
+				Votes: map[string]bool{
+					"self":       true,
+					"stale-node": false,
+				},
+			},
+		},
+		PendingVotes: map[ProposalID]map[string]Vote{
+			"proposal-2": {
+				"stale-node": {
+					ProposalID: "proposal-2",
+					NodeID:     "stale-node",
+				},
+			},
+		},
+		PendingVoteTouched: map[ProposalID]time.Time{
+			"proposal-2": time.Now().UTC(),
+		},
+	}
+
+	cleanStaleNodes()
+
+	if _, ok := State.ClusterNodes["stale-node"]; ok {
+		t.Fatal("expected stale node to be removed from cluster state")
+	}
+	if _, ok := State.Proposals["proposal-1"].Votes["stale-node"]; ok {
+		t.Fatal("expected stale node votes to be removed from active proposals")
+	}
+	if _, ok := State.PendingVotes["proposal-2"]; ok {
+		t.Fatal("expected stale node vote bucket to be removed when emptied")
+	}
+	if _, ok := State.PendingVoteTouched["proposal-2"]; ok {
+		t.Fatal("expected stale node vote timestamp to be removed when bucket empties")
+	}
+}

@@ -18,6 +18,8 @@ var (
 	cfgInitMu      sync.Mutex
 	configUpdaterC chan struct{}
 	configClient   = &http.Client{Timeout: 15 * time.Second}
+	reloadHooksMu  sync.RWMutex
+	reloadHooks    map[string]func()
 )
 
 func Init(cfgFile string) {
@@ -49,8 +51,6 @@ func loadConfig(cfgFile string, initialLoad bool) {
 	}
 
 	cfg.mu.Lock()
-	defer cfg.mu.Unlock()
-
 	loadSystemConfig(cfgFile, initialLoad)
 
 	loadStaticDNSConfig(cfg.data.Local.System.ConfigUrls.StaticDNSConfig, initialLoad)
@@ -59,6 +59,9 @@ func loadConfig(cfgFile string, initialLoad bool) {
 	loadIaasPricing(cfg.data.Local.System.ConfigUrls.IaasPricingConfig, initialLoad)
 	loadServiceRequestsConfig(cfg.data.Local.System.ConfigUrls.ServicesRequestsConfig, initialLoad)
 	loadAlertsConfig(cfg.data.Local.System.ConfigUrls.AlertsConfig, initialLoad)
+	cfg.mu.Unlock()
+
+	runReloadHooks()
 }
 
 func loadAlertsConfig(url string, initialLoad bool) {
@@ -279,7 +282,7 @@ func configUpdater(cfgFile string, stop <-chan struct{}) {
 			interval = 30
 		}
 
-		timer := time.NewTimer(interval * time.Second)
+		timer := time.NewTimer(time.Duration(interval) * time.Second)
 		select {
 		case <-stop:
 			if !timer.Stop() {
@@ -292,6 +295,59 @@ func configUpdater(cfgFile string, stop <-chan struct{}) {
 		case <-timer.C:
 			loadConfig(cfgFile, false)
 		}
+	}
+}
+
+func RegisterReloadHook(name string, hook func()) {
+	if name == "" || hook == nil {
+		return
+	}
+
+	reloadHooksMu.Lock()
+	defer reloadHooksMu.Unlock()
+
+	if reloadHooks == nil {
+		reloadHooks = make(map[string]func())
+	}
+	reloadHooks[name] = hook
+}
+
+func UnregisterReloadHook(name string) {
+	if name == "" {
+		return
+	}
+
+	reloadHooksMu.Lock()
+	defer reloadHooksMu.Unlock()
+	if reloadHooks == nil {
+		return
+	}
+	delete(reloadHooks, name)
+}
+
+func runReloadHooks() {
+	reloadHooksMu.RLock()
+	hooks := make([]struct {
+		name string
+		fn   func()
+	}, 0, len(reloadHooks))
+	for name, fn := range reloadHooks {
+		hooks = append(hooks, struct {
+			name string
+			fn   func()
+		}{name: name, fn: fn})
+	}
+	reloadHooksMu.RUnlock()
+
+	for _, hook := range hooks {
+		func(name string, fn func()) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Log(log.Error, "Config reload hook %s panicked: %v", name, r)
+				}
+			}()
+			fn()
+		}(hook.name, hook.fn)
 	}
 }
 

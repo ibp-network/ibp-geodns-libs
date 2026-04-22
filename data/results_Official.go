@@ -211,7 +211,7 @@ func UpdateOfficialDomainResult(check cfg.Check, member cfg.Member, service cfg.
 				memberName: member.Details.Name,
 				domainName: domain,
 				status:     false,
-				errorText:  "Offline since startup",
+				errorText:  errorMsg,
 				data:       cloneAnyMap(dataMap),
 				isIPv6:     isIPv6,
 			}
@@ -234,7 +234,7 @@ func UpdateOfficialDomainResult(check cfg.Check, member cfg.Member, service cfg.
 					memberName: member.Details.Name,
 					domainName: domain,
 					status:     false,
-					errorText:  "Offline since startup",
+					errorText:  errorMsg,
 					data:       cloneAnyMap(dataMap),
 					isIPv6:     isIPv6,
 				}
@@ -303,7 +303,7 @@ func UpdateOfficialEndpointResult(check cfg.Check, member cfg.Member, service cf
 				domainName: domain,
 				endpoint:   endpoint,
 				status:     false,
-				errorText:  "Offline since startup",
+				errorText:  errorMsg,
 				data:       cloneAnyMap(dataMap),
 				isIPv6:     isIPv6,
 			}
@@ -327,7 +327,7 @@ func UpdateOfficialEndpointResult(check cfg.Check, member cfg.Member, service cf
 					domainName: domain,
 					endpoint:   endpoint,
 					status:     false,
-					errorText:  "Offline since startup",
+					errorText:  errorMsg,
 					data:       cloneAnyMap(dataMap),
 					isIPv6:     isIPv6,
 				}

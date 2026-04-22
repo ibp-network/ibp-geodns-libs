@@ -10,6 +10,7 @@ import (
 
 type UsageRecord struct {
 	Date        string
+	NodeID      string
 	Domain      string
 	MemberName  string
 	CountryCode string
@@ -28,20 +29,21 @@ func UpsertUsageRecord(rec UsageRecord) error {
 
 	q := `
 INSERT INTO requests
-(date, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6, hits)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+(date, node_id, domain_name, member_name, country_code, network_asn, network_name, country_name, is_ipv6, hits)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   hits = hits + VALUES(hits)
 `
 	_, err := mysql.DB.Exec(
 		q,
 		rec.Date,
-		rec.Domain,
-		nullOrString(rec.MemberName),
-		nullOrString(rec.CountryCode),
-		nullOrString(rec.Asn),
-		nullOrString(rec.NetworkName),
-		nullOrString(rec.CountryName),
+		usageKeyValue(rec.NodeID),
+		usageKeyValue(rec.Domain),
+		usageKeyValue(rec.MemberName),
+		usageKeyValue(rec.CountryCode),
+		usageKeyValue(rec.Asn),
+		usageKeyValue(rec.NetworkName),
+		usageKeyValue(rec.CountryName),
 		ipFlag,
 		rec.Hits,
 	)
@@ -207,9 +209,6 @@ ORDER BY date
 	return results, nil
 }
 
-func nullOrString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
+func usageKeyValue(s string) string {
 	return s
 }

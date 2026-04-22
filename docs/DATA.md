@@ -99,12 +99,14 @@ RecordDnsHit(isIPv6 bool, clientIP, domain, memberName string)
 
 ### Usage Aggregation Keys
 - Date (YYYY-MM-DD)
+- Local node ID
 - Domain name
 - Member name
 - Country code
 - ASN (Autonomous System Number)
 - Network name
 - Country name
+- IP family (`is_ipv6`)
 
 ### Automatic Flushing
 - Every 5 minutes via background goroutine

@@ -16,14 +16,15 @@ import (
 func newTestDependencies() Dependencies {
 	return Dependencies{
 		State: &core.NodeState{
-			NodeID:          "monitor-a",
-			Proposals:       make(map[core.ProposalID]*core.ProposalTracking),
-			PendingVotes:    make(map[core.ProposalID]map[string]core.Vote),
-			ClusterNodes:    make(map[string]core.NodeInfo),
-			ProposalTimeout: time.Minute,
-			SubjectPropose:  "consensus.propose",
-			SubjectVote:     "consensus.vote",
-			SubjectFinalize: "consensus.finalize",
+			NodeID:             "monitor-a",
+			Proposals:          make(map[core.ProposalID]*core.ProposalTracking),
+			PendingVotes:       make(map[core.ProposalID]map[string]core.Vote),
+			PendingVoteTouched: make(map[core.ProposalID]time.Time),
+			ClusterNodes:       make(map[string]core.NodeInfo),
+			ProposalTimeout:    time.Minute,
+			SubjectPropose:     "consensus.propose",
+			SubjectVote:        "consensus.vote",
+			SubjectFinalize:    "consensus.finalize",
 		},
 		Publish:             func(string, []byte) error { return nil },
 		CountActiveMonitors: func() int { return 1 },
@@ -807,6 +808,123 @@ func TestHandleVoteWithLockingCountFunctionDoesNotDeadlock(t *testing.T) {
 	}
 }
 
+func TestVoteOnProposalSkipsPublishWhenProposalMissing(t *testing.T) {
+	deps := newTestDependencies()
+
+	prevLocal := dat.Local
+	resetLocalResults()
+	defer func() {
+		dat.Local = prevLocal
+	}()
+
+	check := cfg.Check{Name: "wss"}
+	member := cfg.Member{Details: cfg.MemberDetails{Name: "provider1"}}
+	dat.UpdateLocalEndpointResult(check, member, cfg.Service{}, "rpc.example.com", "wss://rpc.example.com/ws", false, "timeout", nil, true)
+
+	proposal := core.Proposal{
+		ID:             core.ProposalID("missing-proposal"),
+		SenderNodeID:   deps.State.NodeID,
+		CheckType:      "endpoint",
+		CheckName:      "wss",
+		MemberName:     "provider1",
+		DomainName:     "rpc.example.com",
+		Endpoint:       "wss://rpc.example.com/ws",
+		ProposedStatus: false,
+		ErrorText:      "timeout",
+		IsIPv6:         true,
+		Timestamp:      time.Now().UTC(),
+	}
+
+	publishedVotes := 0
+	deps.Publish = func(subject string, data []byte) error {
+		if subject == deps.State.SubjectVote {
+			publishedVotes++
+		}
+		return nil
+	}
+
+	voteOnProposal(deps, proposal)
+
+	if publishedVotes != 0 {
+		t.Fatalf("expected no vote publication for missing proposal, got %d", publishedVotes)
+	}
+}
+
+func TestHandleFinalizeCleansUpTrackedProposalAndUsesFinalizerNode(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	proposalID := core.ProposalID("remote-finalize")
+	pt := &core.ProposalTracking{
+		Proposal: core.Proposal{
+			ID:           proposalID,
+			SenderNodeID: "monitor-proposer",
+		},
+		Votes: map[string]bool{
+			deps.State.NodeID: true,
+		},
+		Timer: time.NewTimer(time.Minute),
+	}
+	deps.State.Proposals[proposalID] = pt
+	deps.State.PendingVotes[proposalID] = map[string]core.Vote{
+		"monitor-b": {
+			ProposalID: proposalID,
+			NodeID:     "monitor-b",
+			Agree:      true,
+		},
+	}
+
+	heardNodes := make([]string, 0, 1)
+	deps.MarkNodeHeard = func(nodeID string) {
+		heardNodes = append(heardNodes, nodeID)
+	}
+
+	applied := make(chan core.FinalizeMessage, 1)
+	deps.OnFinalize = func(msg core.FinalizeMessage) {
+		applied <- msg
+	}
+
+	payload, err := json.Marshal(core.FinalizeMessage{
+		Proposal: core.Proposal{
+			ID:           proposalID,
+			SenderNodeID: "monitor-proposer",
+		},
+		SenderNodeID: "monitor-finalizer",
+		Passed:       true,
+		DecidedAt:    time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal finalize: %v", err)
+	}
+
+	HandleFinalize(deps, &nats.Msg{Data: payload})
+
+	select {
+	case msg := <-applied:
+		if msg.Proposal.ID != proposalID || !msg.Passed {
+			t.Fatalf("unexpected finalize callback payload: %+v", msg)
+		}
+	default:
+		t.Fatal("expected finalize callback to fire")
+	}
+
+	if len(heardNodes) != 1 || heardNodes[0] != "monitor-finalizer" {
+		t.Fatalf("expected finalizer node to be marked heard, got %v", heardNodes)
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if _, ok := deps.State.Proposals[proposalID]; ok {
+		t.Fatalf("expected finalized proposal %s to be removed from tracked proposals", proposalID)
+	}
+	if _, ok := deps.State.PendingVotes[proposalID]; ok {
+		t.Fatalf("expected pending votes for %s to be cleared", proposalID)
+	}
+	if _, ok := deps.State.PendingVoteTouched[proposalID]; ok {
+		t.Fatalf("expected pending vote touched marker for %s to be cleared", proposalID)
+	}
+}
+
 func TestFinalizeAppliesLocallyWithoutEcho(t *testing.T) {
 	deps := newTestDependencies()
 	defer stopProposalTimers(deps.State)
@@ -854,5 +972,73 @@ func TestFinalizeAppliesLocallyWithoutEcho(t *testing.T) {
 	defer deps.State.Mu.RUnlock()
 	if _, ok := deps.State.Proposals[pt.Proposal.ID]; ok {
 		t.Fatalf("expected finalized proposal to be removed from in-memory state")
+	}
+}
+
+func TestForceFinalizeFailsAfterRetryLimit(t *testing.T) {
+	deps := newTestDependencies()
+	defer stopProposalTimers(deps.State)
+
+	deps.State.ClusterNodes[deps.State.NodeID] = core.NodeInfo{
+		NodeID:    deps.State.NodeID,
+		NodeRole:  "IBPMonitor",
+		LastHeard: time.Now().UTC(),
+	}
+
+	proposalID := core.ProposalID("force-finalize-limit")
+	deps.State.Proposals[proposalID] = &core.ProposalTracking{
+		Proposal: core.Proposal{
+			ID:           proposalID,
+			SenderNodeID: deps.State.NodeID,
+			Timestamp:    time.Now().UTC(),
+		},
+		Votes: map[string]bool{
+			deps.State.NodeID: true,
+		},
+	}
+
+	finalized := make(chan core.FinalizeMessage, 1)
+	deps.OnFinalize = func(msg core.FinalizeMessage) {
+		finalized <- msg
+	}
+
+	for attempt := 1; attempt < maxForceFinalizeRetries; attempt++ {
+		forceFinalize(deps, proposalID)
+
+		deps.State.Mu.RLock()
+		pt, ok := deps.State.Proposals[proposalID]
+		if !ok {
+			deps.State.Mu.RUnlock()
+			t.Fatalf("expected proposal to remain tracked before retry limit")
+		}
+		if pt.Finalized {
+			deps.State.Mu.RUnlock()
+			t.Fatalf("expected proposal to remain unresolved before retry limit")
+		}
+		if pt.ForceFinalizeAttempts != attempt {
+			deps.State.Mu.RUnlock()
+			t.Fatalf("expected retry count %d, got %d", attempt, pt.ForceFinalizeAttempts)
+		}
+		if pt.Timer != nil {
+			pt.Timer.Stop()
+		}
+		deps.State.Mu.RUnlock()
+	}
+
+	forceFinalize(deps, proposalID)
+
+	select {
+	case msg := <-finalized:
+		if msg.Proposal.ID != proposalID || msg.Passed {
+			t.Fatalf("expected failed finalize for %s, got %+v", proposalID, msg)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("expected retry limit to finalize the proposal")
+	}
+
+	deps.State.Mu.RLock()
+	defer deps.State.Mu.RUnlock()
+	if _, ok := deps.State.Proposals[proposalID]; ok {
+		t.Fatalf("expected proposal %s to be removed after retry limit", proposalID)
 	}
 }

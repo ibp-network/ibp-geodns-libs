@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	cfg "github.com/ibp-network/ibp-geodns-libs/config"
 	log "github.com/ibp-network/ibp-geodns-libs/logging"
 	max "github.com/ibp-network/ibp-geodns-libs/maxmind"
 )
@@ -40,6 +41,10 @@ type usageMemory struct {
 
 var usageMem = &usageMemory{
 	data: make(map[dailyUsageKey]int),
+}
+
+var usageNodeID = func() string {
+	return cfg.GetConfig().Local.Nats.NodeID
 }
 
 func RecordDnsHit(isIPv6 bool, clientIP, domain, memberName string) {
@@ -107,6 +112,7 @@ func FlushUsageToDatabase(triggerDate string) {
 	for k, hits := range usageMem.data {
 		rec := UsageRecord{
 			Date:        k.Date,
+			NodeID:      usageNodeID(),
 			Domain:      k.Domain,
 			MemberName:  k.MemberName,
 			CountryCode: k.CountryCode,
